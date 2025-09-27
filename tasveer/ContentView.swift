@@ -9,13 +9,35 @@ import SwiftUI
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
+        VStack(spacing: 20) {
+            Image(systemName: "camera.viewfinder")
+                .font(.system(size: 48))
                 .foregroundStyle(.tint)
-            Text("Hello, world!")
+
+            Text("Tasveer")
+                .font(.title)
+                .fontWeight(.bold)
+
+            Text("Screenshot and annotation tool for macOS")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+
+            VStack(spacing: 8) {
+                Text("Quick Actions:")
+                    .font(.headline)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("⌘⇧4 - Capture Area")
+                    Text("⌘⇧5 - Capture Window")
+                    Text("⌘⇧3 - Capture Full Screen")
+                }
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
         }
         .padding()
+        .frame(maxWidth: 300)
     }
 }
 
