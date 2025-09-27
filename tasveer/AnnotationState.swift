@@ -20,12 +20,17 @@ class AnnotationAppState {
     var selectedGradient: BackgroundGradient = .none
     var padding: CGFloat = 32.0 {
         didSet {
-            // Auto-adjust zoom when padding changes to keep content in view
-            adjustZoomForPadding()
+            // Adjust annotation positions when padding changes
+            adjustAnnotationsForPaddingChange(from: oldValue, to: padding)
+            // Immediately adjust zoom smoothly when padding changes
+            adjustZoomForPaddingImmediate()
         }
     }
     var cornerRadius: CGFloat = 12.0
     var showShadow: Bool = true
+    var shadowOffset: CGSize = CGSize(width: 0, height: 7.5)
+    var shadowBlur: CGFloat = 50.0
+    var shadowOpacity: Double = 0.25
     var currentZoom: Double = 100.0
     var showGradientPicker: Bool = true // Always true now since it's always visible
     var extractedText: String = ""
@@ -125,11 +130,10 @@ class AnnotationAppState {
         setZoom(1.0)
     }
 
-    private func adjustZoomForPadding() {
+    private func adjustZoomForPaddingImmediate() {
         guard let scrollView = scrollView,
               selectedGradient != .none else { return }
 
-        // Get the actual visible area (without margins - we want to check actual edges)
         let scrollViewSize = scrollView.contentSize
         let documentView = scrollView.documentView
 
@@ -137,40 +141,42 @@ class AnnotationAppState {
               let canvasView = documentView as? AnnotationCanvasView,
               let image = canvasView.image else { return }
 
-        // Use the actual image size, not document view size
         let imageSize = image.size
-
-        // Calculate the actual content size with current padding
         let contentWithPadding = NSSize(
             width: imageSize.width + padding * 2,
             height: imageSize.height + padding * 2
         )
 
-        // Calculate the current scaled size at current zoom
+        // Calculate what zoom level would be needed to fit the current padding
+        let scaleX = (scrollViewSize.width - 4) / contentWithPadding.width
+        let scaleY = (scrollViewSize.height - 4) / contentWithPadding.height
+        let idealZoom = min(scaleX, scaleY)
+
+        // Get current scaled size
         let currentScaledWidth = contentWithPadding.width * scrollView.magnification
         let currentScaledHeight = contentWithPadding.height * scrollView.magnification
 
-        // Check if padded content actually exceeds the canvas edges (no margins!)
-        // Only zoom out when it truly touches the edges
-        if currentScaledWidth > scrollViewSize.width || currentScaledHeight > scrollViewSize.height {
-            // Calculate minimum zoom needed to fit with a tiny bit of breathing room
-            let scaleX = (scrollViewSize.width - 4) / contentWithPadding.width  // 2px margin
-            let scaleY = (scrollViewSize.height - 4) / contentWithPadding.height // 2px margin
-            let newZoom = min(scaleX, scaleY)
+        // Only adjust if content exceeds edges AND new zoom would be lower
+        if (currentScaledWidth > scrollViewSize.width || currentScaledHeight > scrollViewSize.height) &&
+           idealZoom < scrollView.magnification {
 
-            // Only reduce zoom, never increase it
-            if newZoom < scrollView.magnification {
-                let clampedZoom = max(scrollView.minMagnification, min(scrollView.maxMagnification, newZoom))
+            let clampedZoom = max(scrollView.minMagnification, min(scrollView.maxMagnification, idealZoom))
 
-                // Get document center for smooth zoom
-                let documentCenter = NSPoint(
-                    x: contentWithPadding.width / 2,
-                    y: contentWithPadding.height / 2
-                )
+            // Immediate smooth zoom without any delays
+            let documentCenter = NSPoint(
+                x: contentWithPadding.width / 2,
+                y: contentWithPadding.height / 2
+            )
 
-                scrollView.setMagnification(clampedZoom, centeredAt: documentCenter)
-                zoomLevel = clampedZoom
-            }
+            // Use Core Animation for ultra-smooth real-time adjustments
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.08) // Very quick but visible
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+
+            scrollView.setMagnification(clampedZoom, centeredAt: documentCenter)
+            zoomLevel = clampedZoom
+
+            CATransaction.commit()
         }
     }
 
@@ -206,5 +212,102 @@ class AnnotationAppState {
         )
 
         scrollView.contentView.scroll(to: newOrigin)
+    }
+
+    private func adjustAnnotationsForPaddingChange(from oldPadding: CGFloat, to newPadding: CGFloat) {
+        // Only adjust if we have a gradient (otherwise effectivePadding is always 0)
+        guard selectedGradient != .none, !annotations.isEmpty else { return }
+
+        // Calculate the offset - how much the image position changed
+        let offset = CGPoint(
+            x: newPadding - oldPadding,
+            y: newPadding - oldPadding
+        )
+
+        // Adjust each annotation's coordinates
+        for i in 0..<annotations.count {
+            annotations[i] = adjustAnnotationCoordinates(annotations[i], by: offset)
+        }
+    }
+
+    private func adjustAnnotationCoordinates(_ annotation: Annotation, by offset: CGPoint) -> Annotation {
+        switch annotation {
+        case let drawing as DrawingAnnotation:
+            let adjustedPoints = drawing.points.map { point in
+                CGPoint(x: point.x + offset.x, y: point.y + offset.y)
+            }
+            return DrawingAnnotation(
+                points: adjustedPoints,
+                color: drawing.color,
+                width: drawing.width,
+                isHighlighter: drawing.isHighlighter,
+                anchor: drawing.anchor,
+                paddingContext: drawing.paddingContext
+            )
+
+        case let line as LineAnnotation:
+            return LineAnnotation(
+                startPoint: CGPoint(x: line.startPoint.x + offset.x, y: line.startPoint.y + offset.y),
+                endPoint: CGPoint(x: line.endPoint.x + offset.x, y: line.endPoint.y + offset.y),
+                color: line.color,
+                width: line.width,
+                anchor: line.anchor,
+                paddingContext: line.paddingContext
+            )
+
+        case let rect as RectangleAnnotation:
+            return RectangleAnnotation(
+                startPoint: CGPoint(x: rect.startPoint.x + offset.x, y: rect.startPoint.y + offset.y),
+                endPoint: CGPoint(x: rect.endPoint.x + offset.x, y: rect.endPoint.y + offset.y),
+                color: rect.color,
+                width: rect.width,
+                fillColor: rect.fillColor,
+                anchor: rect.anchor,
+                paddingContext: rect.paddingContext
+            )
+
+        case let circle as CircleAnnotation:
+            return CircleAnnotation(
+                startPoint: CGPoint(x: circle.startPoint.x + offset.x, y: circle.startPoint.y + offset.y),
+                endPoint: CGPoint(x: circle.endPoint.x + offset.x, y: circle.endPoint.y + offset.y),
+                color: circle.color,
+                width: circle.width,
+                fillColor: circle.fillColor,
+                anchor: circle.anchor,
+                paddingContext: circle.paddingContext
+            )
+
+        case let arrow as ArrowAnnotation:
+            return ArrowAnnotation(
+                startPoint: CGPoint(x: arrow.startPoint.x + offset.x, y: arrow.startPoint.y + offset.y),
+                endPoint: CGPoint(x: arrow.endPoint.x + offset.x, y: arrow.endPoint.y + offset.y),
+                color: arrow.color,
+                width: arrow.width,
+                anchor: arrow.anchor,
+                paddingContext: arrow.paddingContext
+            )
+
+        case let text as TextAnnotation:
+            return TextAnnotation(
+                position: CGPoint(x: text.position.x + offset.x, y: text.position.y + offset.y),
+                text: text.text,
+                color: text.color,
+                fontSize: text.fontSize,
+                anchor: text.anchor,
+                paddingContext: text.paddingContext
+            )
+
+        case let blur as BlurAnnotation:
+            return BlurAnnotation(
+                startPoint: CGPoint(x: blur.startPoint.x + offset.x, y: blur.startPoint.y + offset.y),
+                endPoint: CGPoint(x: blur.endPoint.x + offset.x, y: blur.endPoint.y + offset.y),
+                anchor: blur.anchor,
+                paddingContext: blur.paddingContext,
+                blurRadius: blur.blurRadius
+            )
+
+        default:
+            return annotation
+        }
     }
 }

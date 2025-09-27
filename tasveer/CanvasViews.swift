@@ -114,6 +114,9 @@ struct CanvasScrollView: NSViewRepresentable {
         canvasView.padding = padding
         canvasView.cornerRadius = cornerRadius
         canvasView.showShadow = showShadow
+        canvasView.shadowOffset = appState.shadowOffset
+        canvasView.shadowBlur = appState.shadowBlur
+        canvasView.shadowOpacity = appState.shadowOpacity
         canvasView.onAnnotationAdded = { annotation in
             annotations.append(annotation)
         }
@@ -143,6 +146,9 @@ struct CanvasScrollView: NSViewRepresentable {
             canvasView.padding = padding
             canvasView.cornerRadius = cornerRadius
             canvasView.showShadow = showShadow
+            canvasView.shadowOffset = appState.shadowOffset
+            canvasView.shadowBlur = appState.shadowBlur
+            canvasView.shadowOpacity = appState.shadowOpacity
 
             let newSize = calculateCanvasSize(for: image, with: padding, gradient: backgroundGradient)
             if canvasView.frame.size != newSize {
@@ -201,6 +207,15 @@ class AnnotationCanvasView: NSView {
     var showShadow: Bool = true {
         didSet { needsDisplay = true }
     }
+    var shadowOffset: CGSize = CGSize(width: 0, height: 4) {
+        didSet { needsDisplay = true }
+    }
+    var shadowBlur: CGFloat = 8.0 {
+        didSet { needsDisplay = true }
+    }
+    var shadowOpacity: Double = 0.15 {
+        didSet { needsDisplay = true }
+    }
     var onAnnotationAdded: ((Annotation) -> Void)?
 
     private var currentPath: [CGPoint] = []
@@ -241,35 +256,52 @@ class AnnotationCanvasView: NSView {
             context.restoreGState()
         }
 
-        // Draw rounded corner background
-        let boxPath = NSBezierPath(roundedRect: backgroundBoxRect, xRadius: cornerRadius, yRadius: cornerRadius)
+        // Draw shadow if enabled
         if showShadow {
-            NSColor.black.withAlphaComponent(0.15).setFill()
-            boxPath.fill()
+            context.saveGState()
+            context.setShadow(offset: shadowOffset, blur: shadowBlur, color: NSColor.black.withAlphaComponent(shadowOpacity).cgColor)
+
+            // Draw shadow using a very transparent fill to avoid hard edges
+            let imageShadowPath = NSBezierPath(roundedRect: imageRect, xRadius: cornerRadius, yRadius: cornerRadius)
+            NSColor.black.withAlphaComponent(0.5).setFill() // More visible with increased intensity
+            imageShadowPath.fill()
+
+            context.restoreGState()
         }
 
-        // Draw the image
-        let imageClipPath = NSBezierPath(roundedRect: imageRect, xRadius: max(0, cornerRadius), yRadius: max(0, cornerRadius))
+        // Draw the image with corner radius clipping
+        context.saveGState()
+        let imageClipPath = NSBezierPath(roundedRect: imageRect, xRadius: cornerRadius, yRadius: cornerRadius)
         imageClipPath.addClip()
         image.draw(in: imageRect)
+        context.restoreGState()
 
-        // Optional border
-        NSColor.separatorColor.setStroke()
-        boxPath.lineWidth = 1
-        boxPath.stroke()
+        // No border around image for clean shadow appearance
 
-        // Draw annotations
+        // Draw annotations using unified canvas coordinates with masking to box area
+        context.saveGState()
+
+        // Create mask path for the box area (where annotations should be visible)
+        // Use square corners for the entire box area, corners only apply to image
+        let maskPath = NSBezierPath(rect: backgroundBoxRect)
+        maskPath.addClip()
+
         for annotation in annotations {
             context.saveGState()
-            context.translateBy(x: backgroundBoxRect.minX, y: backgroundBoxRect.minY)
             annotation.draw(in: context, imageSize: image.size)
             context.restoreGState()
         }
 
-        // Draw current drawing if active
+        context.restoreGState()
+
+        // Draw current drawing if active (with same masking)
         if isDrawing {
             context.saveGState()
-            context.translateBy(x: backgroundBoxRect.minX, y: backgroundBoxRect.minY)
+
+            // Apply same mask for current drawing
+            let maskPath = NSBezierPath(rect: backgroundBoxRect)
+            maskPath.addClip()
+
             drawCurrentShape(in: context)
             context.restoreGState()
         }
@@ -350,33 +382,28 @@ class AnnotationCanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        let effectivePadding = backgroundGradient == .none ? 0 : padding
-        let imageRect = NSRect(x: effectivePadding, y: effectivePadding, width: image?.size.width ?? 0, height: image?.size.height ?? 0)
 
-        currentAnchor = imageRect.contains(point) ? .image : .box
-
-        let adjustedPoint = CGPoint(
-            x: point.x - (currentAnchor == .image ? effectivePadding : 0),
-            y: point.y - (currentAnchor == .image ? effectivePadding : 0)
-        )
+        // Use raw canvas coordinates - no adjustments needed
+        // The entire canvas (including gradient/padding) is our coordinate system
 
         switch selectedTool {
         case .draw, .highlight:
             isDrawing = true
-            currentPath = [adjustedPoint]
+            currentPath = [point]
 
         case .line, .arrow, .rectangle, .circle, .blur:
             isDrawing = true
-            startPoint = adjustedPoint
-            currentEndPoint = adjustedPoint
+            startPoint = point
+            currentEndPoint = point
 
         case .text:
             let textAnnotation = TextAnnotation(
-                position: adjustedPoint,
+                position: point,
                 text: "Text",
                 color: strokeColor,
                 fontSize: 16,
-                anchor: currentAnchor
+                anchor: .box,
+                paddingContext: backgroundGradient == .none ? 0 : padding
             )
             onAnnotationAdded?(textAnnotation)
 
@@ -391,19 +418,14 @@ class AnnotationCanvasView: NSView {
         guard isDrawing else { return }
 
         let point = convert(event.locationInWindow, from: nil)
-        let effectivePadding = backgroundGradient == .none ? 0 : padding
 
-        let adjustedPoint = CGPoint(
-            x: point.x - (currentAnchor == .image ? effectivePadding : 0),
-            y: point.y - (currentAnchor == .image ? effectivePadding : 0)
-        )
-
+        // Use raw canvas coordinates - no adjustments
         switch selectedTool {
         case .draw, .highlight:
-            currentPath.append(adjustedPoint)
+            currentPath.append(point)
 
         case .line, .arrow, .rectangle, .circle, .blur:
-            currentEndPoint = adjustedPoint
+            currentEndPoint = point
 
         default:
             break
@@ -426,7 +448,8 @@ class AnnotationCanvasView: NSView {
                     color: strokeColor,
                     width: strokeWidth,
                     isHighlighter: selectedTool == .highlight,
-                    anchor: currentAnchor
+                    anchor: .box,
+                    paddingContext: backgroundGradient == .none ? 0 : padding
                 )
                 onAnnotationAdded?(annotation)
             }
@@ -437,7 +460,8 @@ class AnnotationCanvasView: NSView {
                 endPoint: currentEndPoint,
                 color: strokeColor,
                 width: strokeWidth,
-                anchor: currentAnchor
+                anchor: currentAnchor,
+                paddingContext: backgroundGradient == .none ? 0 : padding
             )
             onAnnotationAdded?(annotation)
 
@@ -448,7 +472,8 @@ class AnnotationCanvasView: NSView {
                 color: strokeColor,
                 width: strokeWidth,
                 fillColor: nil,
-                anchor: currentAnchor
+                anchor: currentAnchor,
+                paddingContext: backgroundGradient == .none ? 0 : padding
             )
             onAnnotationAdded?(annotation)
 
@@ -459,7 +484,8 @@ class AnnotationCanvasView: NSView {
                 color: strokeColor,
                 width: strokeWidth,
                 fillColor: nil,
-                anchor: currentAnchor
+                anchor: currentAnchor,
+                paddingContext: backgroundGradient == .none ? 0 : padding
             )
             onAnnotationAdded?(annotation)
 
@@ -469,7 +495,8 @@ class AnnotationCanvasView: NSView {
                 endPoint: currentEndPoint,
                 color: strokeColor,
                 width: strokeWidth,
-                anchor: currentAnchor
+                anchor: currentAnchor,
+                paddingContext: backgroundGradient == .none ? 0 : padding
             )
             onAnnotationAdded?(annotation)
 
@@ -478,6 +505,7 @@ class AnnotationCanvasView: NSView {
                 startPoint: startPoint,
                 endPoint: currentEndPoint,
                 anchor: currentAnchor,
+                paddingContext: backgroundGradient == .none ? 0 : padding,
                 blurRadius: 10
             )
             onAnnotationAdded?(annotation)

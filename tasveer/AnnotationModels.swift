@@ -98,6 +98,7 @@ struct DrawingAnnotation: Annotation {
     let width: CGFloat
     let isHighlighter: Bool
     let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
 
     func draw(in context: CGContext?, imageSize: CGSize) {
         guard let context = context, points.count >= 2 else { return }
@@ -153,6 +154,7 @@ struct LineAnnotation: Annotation {
     let color: NSColor
     let width: CGFloat
     let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
 
     var strokeWidth: CGFloat { width }
 
@@ -176,6 +178,7 @@ struct RectangleAnnotation: Annotation {
     let width: CGFloat
     let fillColor: NSColor?
     let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
 
     var rect: CGRect {
         get {
@@ -219,6 +222,7 @@ struct CircleAnnotation: Annotation {
     let width: CGFloat
     let fillColor: NSColor?
     let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
 
     var rect: CGRect {
         get {
@@ -261,6 +265,7 @@ struct ArrowAnnotation: Annotation {
     let color: NSColor
     let width: CGFloat
     let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
 
     var strokeWidth: CGFloat { width }
 
@@ -307,6 +312,7 @@ struct TextAnnotation: Annotation {
     let color: NSColor
     let fontSize: CGFloat
     let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
 
     var bounds: CGRect {
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
@@ -353,6 +359,7 @@ struct BlurAnnotation: Annotation {
     var startPoint: CGPoint
     var endPoint: CGPoint
     let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
     let blurRadius: CGFloat
 
     var rect: CGRect {

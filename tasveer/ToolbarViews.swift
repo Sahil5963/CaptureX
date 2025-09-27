@@ -522,9 +522,38 @@ struct CanvasSettingsSection: View {
                     .foregroundColor(.secondary)
             }
 
-            // Shadow toggle
-            Toggle("Shadow", isOn: $appState.showShadow)
-                .toggleStyle(.switch)
+            // Shadow control
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Shadow")
+                    .font(.subheadline.bold())
+
+                HStack {
+                    Text("0")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Slider(value: Binding<Double>(
+                        get: { appState.showShadow ? (appState.shadowOpacity / 0.5) : 0 },
+                        set: { newValue in
+                            if newValue > 0 {
+                                appState.showShadow = true
+                                appState.shadowOpacity = newValue * 0.5 // 0-50% opacity (more visible)
+                                // Auto-adjust other shadow properties based on intensity (more downward and wider spread)
+                                appState.shadowOffset.height = CGFloat(newValue * 15) // 0-15px offset downward (much more down)
+                                appState.shadowBlur = CGFloat(newValue * 100) // 0-100px blur for much wider spread
+                            } else {
+                                appState.showShadow = false
+                            }
+                        }
+                    ), in: 0...1)
+                    Text("100")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+
+                Text("\(Int((appState.showShadow ? (appState.shadowOpacity / 0.5) : 0) * 100))%")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
         }
     }
 }

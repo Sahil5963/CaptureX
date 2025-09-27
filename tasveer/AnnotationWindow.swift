@@ -313,50 +313,43 @@ struct MinimalTopBar: View {
             context.restoreGState()
         }
 
-        // Draw rounded corner background with shadow
-        if appState.selectedGradient != .none {
-            let boxPath = NSBezierPath(
-                roundedRect: backgroundRect,
-                xRadius: appState.cornerRadius,
-                yRadius: appState.cornerRadius
-            )
+        // Draw shadow if enabled
+        if appState.showShadow {
+            context.saveGState()
+            context.setShadow(offset: appState.shadowOffset, blur: appState.shadowBlur, color: NSColor.black.withAlphaComponent(appState.shadowOpacity).cgColor)
 
-            if appState.showShadow {
-                NSColor.black.withAlphaComponent(0.15).setFill()
-                boxPath.fill()
-            }
+            // Draw shadow using a very transparent fill to avoid hard edges
+            let imageShadowPath = NSBezierPath(roundedRect: imageRect, xRadius: appState.cornerRadius, yRadius: appState.cornerRadius)
+            NSColor.black.withAlphaComponent(0.5).setFill() // More visible with increased intensity
+            imageShadowPath.fill()
+
+            context.restoreGState()
         }
 
-        // Draw the image with clipping
-        if appState.selectedGradient != .none && appState.cornerRadius > 0 {
-            let imageClipPath = NSBezierPath(
-                roundedRect: imageRect,
-                xRadius: max(0, appState.cornerRadius),
-                yRadius: max(0, appState.cornerRadius)
-            )
-            imageClipPath.addClip()
-        }
+        // Draw the image with corner radius clipping
+        context.saveGState()
+        let imageClipPath = NSBezierPath(roundedRect: imageRect, xRadius: appState.cornerRadius, yRadius: appState.cornerRadius)
+        imageClipPath.addClip()
         image.draw(in: imageRect)
+        context.restoreGState()
 
-        // Draw border if needed
-        if appState.selectedGradient != .none {
-            let borderPath = NSBezierPath(
-                roundedRect: backgroundRect,
-                xRadius: appState.cornerRadius,
-                yRadius: appState.cornerRadius
-            )
-            NSColor.separatorColor.setStroke()
-            borderPath.lineWidth = 1
-            borderPath.stroke()
-        }
+        // No border around image for clean shadow appearance
 
-        // Draw annotations
+        // Draw annotations using unified canvas coordinates with masking to box area
+        context.saveGState()
+
+        // Create mask path for the box area (where annotations should be visible)
+        // Use square corners for the entire box area, corners only apply to image
+        let maskPath = NSBezierPath(rect: backgroundRect)
+        maskPath.addClip()
+
         for annotation in appState.annotations {
             context.saveGState()
-            context.translateBy(x: effectivePadding, y: effectivePadding)
             annotation.draw(in: context, imageSize: image.size)
             context.restoreGState()
         }
+
+        context.restoreGState()
 
         renderedImage.unlockFocus()
         return renderedImage
