@@ -474,9 +474,34 @@ struct CanvasSettingsSection: View {
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
-                Text("\(Int(paddingBinding.wrappedValue))px")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+
+                // Padding indicators
+                HStack(spacing: 8) {
+                    Text("\(Int(paddingBinding.wrappedValue))px")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+
+                    // Horizontal and vertical indicators
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.left.and.right")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("\(Int(paddingBinding.wrappedValue * 2))px")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.and.down")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text("\(Int(paddingBinding.wrappedValue * 2))px")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             // Corner radius
@@ -760,9 +785,34 @@ struct RightSidebarView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                    Text("\(Int(paddingBinding.wrappedValue))px")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+
+                    // Padding indicators
+                    HStack(spacing: 8) {
+                        Text("\(Int(paddingBinding.wrappedValue))px")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+
+                        // Horizontal and vertical indicators
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.left.and.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(Int(paddingBinding.wrappedValue * 2))px")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.up.and.down")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text("\(Int(paddingBinding.wrappedValue * 2))px")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
 
                 // Corner radius

@@ -18,7 +18,12 @@ class AnnotationAppState {
     var strokeColor: Color = .red
     var strokeWidth: Double = 3.0
     var selectedGradient: BackgroundGradient = .none
-    var padding: CGFloat = 32.0
+    var padding: CGFloat = 32.0 {
+        didSet {
+            // Auto-adjust zoom when padding changes to keep content in view
+            adjustZoomForPadding()
+        }
+    }
     var cornerRadius: CGFloat = 12.0
     var showShadow: Bool = true
     var currentZoom: Double = 100.0
@@ -118,6 +123,55 @@ class AnnotationAppState {
 
     func zoomToActualSize() {
         setZoom(1.0)
+    }
+
+    private func adjustZoomForPadding() {
+        guard let scrollView = scrollView,
+              selectedGradient != .none else { return }
+
+        // Get the actual visible area (without margins - we want to check actual edges)
+        let scrollViewSize = scrollView.contentSize
+        let documentView = scrollView.documentView
+
+        guard scrollViewSize.width > 0 && scrollViewSize.height > 0,
+              let canvasView = documentView as? AnnotationCanvasView,
+              let image = canvasView.image else { return }
+
+        // Use the actual image size, not document view size
+        let imageSize = image.size
+
+        // Calculate the actual content size with current padding
+        let contentWithPadding = NSSize(
+            width: imageSize.width + padding * 2,
+            height: imageSize.height + padding * 2
+        )
+
+        // Calculate the current scaled size at current zoom
+        let currentScaledWidth = contentWithPadding.width * scrollView.magnification
+        let currentScaledHeight = contentWithPadding.height * scrollView.magnification
+
+        // Check if padded content actually exceeds the canvas edges (no margins!)
+        // Only zoom out when it truly touches the edges
+        if currentScaledWidth > scrollViewSize.width || currentScaledHeight > scrollViewSize.height {
+            // Calculate minimum zoom needed to fit with a tiny bit of breathing room
+            let scaleX = (scrollViewSize.width - 4) / contentWithPadding.width  // 2px margin
+            let scaleY = (scrollViewSize.height - 4) / contentWithPadding.height // 2px margin
+            let newZoom = min(scaleX, scaleY)
+
+            // Only reduce zoom, never increase it
+            if newZoom < scrollView.magnification {
+                let clampedZoom = max(scrollView.minMagnification, min(scrollView.maxMagnification, newZoom))
+
+                // Get document center for smooth zoom
+                let documentCenter = NSPoint(
+                    x: contentWithPadding.width / 2,
+                    y: contentWithPadding.height / 2
+                )
+
+                scrollView.setMagnification(clampedZoom, centeredAt: documentCenter)
+                zoomLevel = clampedZoom
+            }
+        }
     }
 
     func setZoom(_ zoom: CGFloat) {
