@@ -10,6 +10,29 @@ import Foundation
 import AppKit
 import SwiftUI
 
+// MARK: - Utility Functions
+
+fileprivate func distanceFromPointToLineSegment(point: CGPoint, lineStart: CGPoint, lineEnd: CGPoint) -> CGFloat {
+    let dx = lineEnd.x - lineStart.x
+    let dy = lineEnd.y - lineStart.y
+
+    if dx == 0 && dy == 0 {
+        let dx2 = point.x - lineStart.x
+        let dy2 = point.y - lineStart.y
+        return sqrt(dx2 * dx2 + dy2 * dy2)
+    }
+
+    let t = max(0, min(1, ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (dx * dx + dy * dy)))
+    let closestPoint = CGPoint(
+        x: lineStart.x + t * dx,
+        y: lineStart.y + t * dy
+    )
+
+    let dx3 = point.x - closestPoint.x
+    let dy3 = point.y - closestPoint.y
+    return sqrt(dx3 * dx3 + dy3 * dy3)
+}
+
 // MARK: - Supporting Enums and Types
 
 enum AnnotationTool: CaseIterable {
@@ -92,6 +115,17 @@ protocol Annotation {
     func draw(in context: CGContext?, imageSize: CGSize)
 }
 
+protocol SelectableAnnotation: Annotation {
+    var bounds: CGRect { get }
+    func contains(point: CGPoint) -> Bool
+}
+
+protocol ResizableAnnotation: SelectableAnnotation {
+    var startPoint: CGPoint { get set }
+    var endPoint: CGPoint { get set }
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> Self
+}
+
 struct DrawingAnnotation: Annotation {
     let points: [CGPoint]
     let color: NSColor
@@ -148,7 +182,7 @@ struct DrawingAnnotation: Annotation {
     }
 }
 
-struct LineAnnotation: Annotation {
+struct LineAnnotation: ResizableAnnotation {
     var startPoint: CGPoint
     var endPoint: CGPoint
     let color: NSColor
@@ -157,6 +191,31 @@ struct LineAnnotation: Annotation {
     let paddingContext: CGFloat
 
     var strokeWidth: CGFloat { width }
+
+    var bounds: CGRect {
+        let minX = min(startPoint.x, endPoint.x)
+        let maxX = max(startPoint.x, endPoint.x)
+        let minY = min(startPoint.y, endPoint.y)
+        let maxY = max(startPoint.y, endPoint.y)
+        return CGRect(x: minX - 10, y: minY - 10, width: maxX - minX + 20, height: maxY - minY + 20)
+    }
+
+    func contains(point: CGPoint) -> Bool {
+        // For lines, use distance-based hit detection for better accuracy
+        let distance = distanceFromPointToLineSegment(point: point, lineStart: startPoint, lineEnd: endPoint)
+        return distance <= 12.0  // 12px hit tolerance for lines
+    }
+
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> LineAnnotation {
+        return LineAnnotation(
+            startPoint: startPoint,
+            endPoint: endPoint,
+            color: color,
+            width: width,
+            anchor: anchor,
+            paddingContext: paddingContext
+        )
+    }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
         guard let context = context else { return }
@@ -171,7 +230,7 @@ struct LineAnnotation: Annotation {
     }
 }
 
-struct RectangleAnnotation: Annotation {
+struct RectangleAnnotation: ResizableAnnotation {
     var startPoint: CGPoint
     var endPoint: CGPoint
     let color: NSColor
@@ -195,7 +254,25 @@ struct RectangleAnnotation: Annotation {
         }
     }
 
+    var bounds: CGRect { rect }
     var strokeWidth: CGFloat { width }
+
+    func contains(point: CGPoint) -> Bool {
+        // More generous hit detection for rectangles
+        return rect.insetBy(dx: -8, dy: -8).contains(point)
+    }
+
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> RectangleAnnotation {
+        return RectangleAnnotation(
+            startPoint: startPoint,
+            endPoint: endPoint,
+            color: color,
+            width: width,
+            fillColor: fillColor,
+            anchor: anchor,
+            paddingContext: paddingContext
+        )
+    }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
         guard let context = context else { return }
@@ -215,7 +292,7 @@ struct RectangleAnnotation: Annotation {
     }
 }
 
-struct CircleAnnotation: Annotation {
+struct CircleAnnotation: ResizableAnnotation {
     var startPoint: CGPoint
     var endPoint: CGPoint
     let color: NSColor
@@ -239,7 +316,25 @@ struct CircleAnnotation: Annotation {
         }
     }
 
+    var bounds: CGRect { rect }
     var strokeWidth: CGFloat { width }
+
+    func contains(point: CGPoint) -> Bool {
+        // More generous hit detection for circles
+        return rect.insetBy(dx: -8, dy: -8).contains(point)
+    }
+
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> CircleAnnotation {
+        return CircleAnnotation(
+            startPoint: startPoint,
+            endPoint: endPoint,
+            color: color,
+            width: width,
+            fillColor: fillColor,
+            anchor: anchor,
+            paddingContext: paddingContext
+        )
+    }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
         guard let context = context else { return }
@@ -259,15 +354,159 @@ struct CircleAnnotation: Annotation {
     }
 }
 
-struct ArrowAnnotation: Annotation {
+struct ArrowAnnotation: ResizableAnnotation {
     var startPoint: CGPoint
     var endPoint: CGPoint
+    var controlPoint: CGPoint?
+    var curveParameter: CGFloat? // Track position along line where curve control was placed (0.0 to 1.0)
     let color: NSColor
     let width: CGFloat
     let anchor: AnnotationAnchor
     let paddingContext: CGFloat
 
     var strokeWidth: CGFloat { width }
+
+    var midPoint: CGPoint {
+        CGPoint(
+            x: (startPoint.x + endPoint.x) / 2,
+            y: (startPoint.y + endPoint.y) / 2
+        )
+    }
+
+    var bounds: CGRect {
+        let allPoints = [startPoint, endPoint, controlPoint ?? midPoint]
+        let minX = allPoints.map { $0.x }.min() ?? 0
+        let maxX = allPoints.map { $0.x }.max() ?? 0
+        let minY = allPoints.map { $0.y }.min() ?? 0
+        let maxY = allPoints.map { $0.y }.max() ?? 0
+        return CGRect(x: minX - 10, y: minY - 10, width: maxX - minX + 20, height: maxY - minY + 20)
+    }
+
+    func contains(point: CGPoint) -> Bool {
+        // For arrows, check both the main line and curve path
+        if let control = controlPoint {
+            // Check if point is near the curved path
+            let curveDistance = distanceFromPointToCurve(point: point, start: startPoint, end: endPoint, control: control)
+            if curveDistance <= 12.0 {
+                return true
+            }
+        }
+
+        // Check if point is near the straight line
+        let lineDistance = distanceFromPointToLineSegment(point: point, lineStart: startPoint, lineEnd: endPoint)
+        return lineDistance <= 12.0  // 12px hit tolerance for arrows
+    }
+
+    private func distanceFromPointToCurve(point: CGPoint, start: CGPoint, end: CGPoint, control: CGPoint) -> CGFloat {
+        var minDistance: CGFloat = .greatestFiniteMagnitude
+
+        // Sample the curve at multiple points to find closest distance
+        for i in 0...20 {
+            let t = CGFloat(i) / 20.0
+            let curvePoint = pointOnQuadraticBezierCurve(start: start, end: end, control: control, t: t)
+            let dx = point.x - curvePoint.x
+            let dy = point.y - curvePoint.y
+            let distance = sqrt(dx * dx + dy * dy)
+            minDistance = min(minDistance, distance)
+        }
+
+        return minDistance
+    }
+
+    private func pointOnQuadraticBezierCurve(start: CGPoint, end: CGPoint, control: CGPoint, t: CGFloat) -> CGPoint {
+        let oneMinusT = 1.0 - t
+        let oneMinusTSquared = oneMinusT * oneMinusT
+        let tSquared = t * t
+        let twoOneMinusTt = 2.0 * oneMinusT * t
+
+        return CGPoint(
+            x: oneMinusTSquared * start.x + twoOneMinusTt * control.x + tSquared * end.x,
+            y: oneMinusTSquared * start.y + twoOneMinusTt * control.y + tSquared * end.y
+        )
+    }
+
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> ArrowAnnotation {
+        var newControlPoint: CGPoint?
+
+        if let oldControl = controlPoint {
+            // Find the closest point on the old line to the control point
+            let oldClosestPoint = closestPointOnLineSegment(
+                point: oldControl,
+                lineStart: self.startPoint,
+                lineEnd: self.endPoint
+            )
+
+            // Calculate the offset vector from the line to the control point
+            let offsetVector = CGPoint(
+                x: oldControl.x - oldClosestPoint.x,
+                y: oldControl.y - oldClosestPoint.y
+            )
+
+            // Calculate the relative position along the old line
+            let oldLineVector = CGPoint(x: self.endPoint.x - self.startPoint.x, y: self.endPoint.y - self.startPoint.y)
+            let oldLineLength = sqrt(oldLineVector.x * oldLineVector.x + oldLineVector.y * oldLineVector.y)
+
+            var t: CGFloat = 0.5 // Default to middle
+            if oldLineLength > 0 {
+                let toClosest = CGPoint(x: oldClosestPoint.x - self.startPoint.x, y: oldClosestPoint.y - self.startPoint.y)
+                t = sqrt(toClosest.x * toClosest.x + toClosest.y * toClosest.y) / oldLineLength
+            }
+
+            // Apply the same relative position to the new line
+            let newClosestPoint = CGPoint(
+                x: startPoint.x + t * (endPoint.x - startPoint.x),
+                y: startPoint.y + t * (endPoint.y - startPoint.y)
+            )
+
+            // Add the offset vector to get the new control point
+            newControlPoint = CGPoint(
+                x: newClosestPoint.x + offsetVector.x,
+                y: newClosestPoint.y + offsetVector.y
+            )
+        }
+
+        return ArrowAnnotation(
+            startPoint: startPoint,
+            endPoint: endPoint,
+            color: color,
+            width: width,
+            anchor: anchor,
+            paddingContext: paddingContext,
+            controlPoint: newControlPoint,
+            curveParameter: curveParameter
+        )
+    }
+
+    private func closestPointOnLineSegment(point: CGPoint, lineStart: CGPoint, lineEnd: CGPoint) -> CGPoint {
+        let dx = lineEnd.x - lineStart.x
+        let dy = lineEnd.y - lineStart.y
+
+        if dx == 0 && dy == 0 {
+            return lineStart
+        }
+
+        let t = max(0, min(1, ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / (dx * dx + dy * dy)))
+
+        return CGPoint(
+            x: lineStart.x + t * dx,
+            y: lineStart.y + t * dy
+        )
+    }
+
+    init(startPoint: CGPoint, endPoint: CGPoint, color: NSColor, width: CGFloat, anchor: AnnotationAnchor, paddingContext: CGFloat, controlPoint: CGPoint? = nil, curveParameter: CGFloat? = nil) {
+        self.startPoint = startPoint
+        self.endPoint = endPoint
+        self.color = color
+        self.width = width
+        self.anchor = anchor
+        self.paddingContext = paddingContext
+        self.curveParameter = curveParameter ?? 0.5 // Default to middle
+        // Initialize control point to the midpoint of the line (no curve by default)
+        self.controlPoint = controlPoint ?? CGPoint(
+            x: (startPoint.x + endPoint.x) / 2,
+            y: (startPoint.y + endPoint.y) / 2
+        )
+    }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
         guard let context = context else { return }
@@ -277,30 +516,74 @@ struct ArrowAnnotation: Annotation {
         context.setLineCap(.round)
         context.setLineJoin(.round)
 
-        // Draw main line
-        context.move(to: startPoint)
-        context.addLine(to: endPoint)
+        // Draw main line (curved if control point is significantly away from the line)
+        if let control = controlPoint {
+            // Calculate distance from control point to the line
+            let distanceToLine = distanceFromPointToLineSegment(
+                point: control,
+                lineStart: startPoint,
+                lineEnd: endPoint
+            )
 
-        // Calculate arrow head
-        let angle = atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x)
-        let arrowLength: CGFloat = 20
-        let arrowAngle: CGFloat = 0.5
+            if distanceToLine > 5 {
+                // Draw curved arrow
+                context.move(to: startPoint)
+                context.addQuadCurve(to: endPoint, control: control)
 
-        let arrowPoint1 = CGPoint(
-            x: endPoint.x - arrowLength * cos(angle - arrowAngle),
-            y: endPoint.y - arrowLength * sin(angle - arrowAngle)
-        )
+                // Calculate tangent direction at end point for arrow head
+                let t: CGFloat = 0.95 // Point slightly before end to get direction
+                let tangentPoint = CGPoint(
+                    x: (1 - t) * (1 - t) * startPoint.x + 2 * (1 - t) * t * control.x + t * t * endPoint.x,
+                    y: (1 - t) * (1 - t) * startPoint.y + 2 * (1 - t) * t * control.y + t * t * endPoint.y
+                )
 
-        let arrowPoint2 = CGPoint(
-            x: endPoint.x - arrowLength * cos(angle + arrowAngle),
-            y: endPoint.y - arrowLength * sin(angle + arrowAngle)
-        )
+                let angle = atan2(endPoint.y - tangentPoint.y, endPoint.x - tangentPoint.x)
 
-        // Draw arrow head
-        context.move(to: endPoint)
-        context.addLine(to: arrowPoint1)
-        context.move(to: endPoint)
-        context.addLine(to: arrowPoint2)
+                let arrowLength: CGFloat = 20
+                let arrowAngle: CGFloat = 0.5
+
+                let arrowPoint1 = CGPoint(
+                    x: endPoint.x - arrowLength * cos(angle - arrowAngle),
+                    y: endPoint.y - arrowLength * sin(angle - arrowAngle)
+                )
+
+                let arrowPoint2 = CGPoint(
+                    x: endPoint.x - arrowLength * cos(angle + arrowAngle),
+                    y: endPoint.y - arrowLength * sin(angle + arrowAngle)
+                )
+
+                // Draw arrow head
+                context.move(to: endPoint)
+                context.addLine(to: arrowPoint1)
+                context.move(to: endPoint)
+                context.addLine(to: arrowPoint2)
+            } else {
+                // Draw straight arrow
+                context.move(to: startPoint)
+                context.addLine(to: endPoint)
+
+                // Calculate arrow head
+                let angle = atan2(endPoint.y - startPoint.y, endPoint.x - startPoint.x)
+                let arrowLength: CGFloat = 20
+                let arrowAngle: CGFloat = 0.5
+
+                let arrowPoint1 = CGPoint(
+                    x: endPoint.x - arrowLength * cos(angle - arrowAngle),
+                    y: endPoint.y - arrowLength * sin(angle - arrowAngle)
+                )
+
+                let arrowPoint2 = CGPoint(
+                    x: endPoint.x - arrowLength * cos(angle + arrowAngle),
+                    y: endPoint.y - arrowLength * sin(angle + arrowAngle)
+                )
+
+                // Draw arrow head
+                context.move(to: endPoint)
+                context.addLine(to: arrowPoint1)
+                context.move(to: endPoint)
+                context.addLine(to: arrowPoint2)
+            }
+        }
 
         context.strokePath()
     }
@@ -331,7 +614,7 @@ struct TextAnnotation: Annotation {
     }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
-        guard let context = context, !text.isEmpty else { return }
+        guard let _ = context, !text.isEmpty else { return }
 
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
         let attributes: [NSAttributedString.Key: Any] = [

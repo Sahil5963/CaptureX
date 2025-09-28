@@ -15,6 +15,7 @@ import SwiftUI
 class AnnotationAppState {
     var selectedTool: AnnotationTool = .select
     var annotations: [Annotation] = []
+    var selectedAnnotationIndex: Int? = nil
     var strokeColor: Color = .red
     var strokeWidth: Double = 3.0
     var selectedGradient: BackgroundGradient = .none
@@ -47,6 +48,22 @@ class AnnotationAppState {
     // Actions
     func addAnnotation(_ annotation: Annotation) {
         annotations.append(annotation)
+    }
+
+    func selectAnnotation(at index: Int?) {
+        selectedAnnotationIndex = index
+    }
+
+    func deleteSelectedAnnotation() {
+        guard let index = selectedAnnotationIndex,
+              index < annotations.count else { return }
+        annotations.remove(at: index)
+        selectedAnnotationIndex = nil
+    }
+
+    func updateAnnotation(at index: Int, with annotation: Annotation) {
+        guard index < annotations.count else { return }
+        annotations[index] = annotation
     }
 
     func toggleGradientPicker() {
@@ -278,13 +295,18 @@ class AnnotationAppState {
             )
 
         case let arrow as ArrowAnnotation:
+            let adjustedControlPoint = arrow.controlPoint.map { controlPoint in
+                CGPoint(x: controlPoint.x + offset.x, y: controlPoint.y + offset.y)
+            }
             return ArrowAnnotation(
                 startPoint: CGPoint(x: arrow.startPoint.x + offset.x, y: arrow.startPoint.y + offset.y),
                 endPoint: CGPoint(x: arrow.endPoint.x + offset.x, y: arrow.endPoint.y + offset.y),
                 color: arrow.color,
                 width: arrow.width,
                 anchor: arrow.anchor,
-                paddingContext: arrow.paddingContext
+                paddingContext: arrow.paddingContext,
+                controlPoint: adjustedControlPoint,
+                curveParameter: arrow.curveParameter
             )
 
         case let text as TextAnnotation:
