@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Reset Tasveer App Permissions - Development Helper Script
+# Reset CaptureX App Permissions - Development Helper Script
 # This script helps reset permissions during development
 
-APP_NAME="tasveer"
-BUNDLE_ID="com.delta4.tasveer"
+APP_NAME="CaptureX"
+BUNDLE_ID="com.delta4.capturex"
 
-echo "🔧 Tasveer Development - Permission Reset Helper"
+echo "🔧 CaptureX Development - Permission Reset Helper"
 echo "=================================================="
 
 # Function to reset TCC database permissions
@@ -30,7 +30,7 @@ clean_build() {
 
     # Clean Xcode build folder
     if command -v xcodebuild &> /dev/null; then
-        xcodebuild clean -project tasveer.xcodeproj 2>/dev/null && echo "   → Xcode clean completed"
+        xcodebuild clean -project CaptureX.xcodeproj 2>/dev/null && echo "   → Xcode clean completed"
     fi
 
     echo "✅ Build cleaning completed"
@@ -48,7 +48,7 @@ kill_app() {
 # Main execution
 echo ""
 echo "This script will:"
-echo "• Kill any running Tasveer instances"
+echo "• Kill any running CaptureX instances"
 echo "• Reset screen recording permissions"
 echo "• Clean build artifacts"
 echo ""

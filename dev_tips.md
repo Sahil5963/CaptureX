@@ -1,4 +1,4 @@
-# Tasveer Development Tips
+# CaptureX Development Tips
 
 ## 🔥 Faster Development Workflow
 
@@ -43,8 +43,8 @@ Add to your scheme's Run configuration:
 ### 8. Quick Testing Commands:
 ```bash
 # Fast clean build
-xcodebuild clean -project tasveer.xcodeproj
-xcodebuild -project tasveer.xcodeproj
+xcodebuild clean -project CaptureX.xcodeproj
+xcodebuild -project CaptureX.xcodeproj
 
 # Or use the reset script only when needed
 ./reset_permissions.sh
