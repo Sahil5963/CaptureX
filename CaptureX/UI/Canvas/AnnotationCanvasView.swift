@@ -73,6 +73,9 @@ class AnnotationCanvasView: NSView {
     private var isAdjustingCurve = false
     private var currentMousePosition: CGPoint = .zero
     private var hoveredAnnotationIndex: Int? = nil
+    private var isDraggingAnnotation = false
+    private var dragStartPoint: CGPoint = .zero
+    private var annotationOriginalPosition: CGPoint = .zero
 
     // Track state before drag/resize for undo batching
     private var annotationStateBeforeDrag: [Annotation]? = nil
@@ -292,6 +295,7 @@ class AnnotationCanvasView: NSView {
             context.addLine(to: arrowPoint1)
             context.move(to: currentEndPoint)
             context.addLine(to: arrowPoint2)
+            context.strokePath()
 
         case .taperedArrow:
             // Preview tapered arrow while drawing
@@ -472,6 +476,20 @@ class AnnotationCanvasView: NSView {
             }
             selectedAnnotationIndex = annotationIndex
             onAnnotationSelected?(annotationIndex)
+
+            // Only start dragging if NOT clicking on a resize handle
+            // Check if we're clicking on a handle - if not, start dragging
+            let annotation = annotations[annotationIndex]
+            let handle = getResizeHandle(at: point, for: annotation)
+
+            if handle == .none {
+                // Start dragging the annotation (not a handle)
+                isDraggingAnnotation = true
+                dragStartPoint = point
+                annotationStateBeforeDrag = annotations
+                onDragStateChanged?(true)
+            }
+
             needsDisplay = true
             return
         }
@@ -530,6 +548,23 @@ class AnnotationCanvasView: NSView {
             return
         }
 
+        // Handle dragging/moving annotations
+        if isDraggingAnnotation, let selectedIndex = selectedAnnotationIndex, selectedIndex < annotations.count {
+            let deltaX = point.x - dragStartPoint.x
+            let deltaY = point.y - dragStartPoint.y
+            let offset = CGPoint(x: deltaX, y: deltaY)
+
+            // Move the annotation
+            annotations[selectedIndex] = moveAnnotation(annotations[selectedIndex], by: offset)
+            onAnnotationUpdated?(selectedIndex, annotations[selectedIndex])
+
+            // Update drag start point for next delta calculation
+            dragStartPoint = point
+
+            needsDisplay = true
+            return
+        }
+
         guard isDrawing else { return }
 
         // Use raw canvas coordinates - no adjustments
@@ -564,6 +599,22 @@ class AnnotationCanvasView: NSView {
             resizeHandle = .none
             isAdjustingCurve = false
             currentMousePosition = .zero
+            needsDisplay = true
+            return
+        }
+
+        if isDraggingAnnotation {
+            // Notify that drag ended
+            onDragStateChanged?(false)
+
+            // If we have state before drag, trigger a single undo entry with snapshots
+            if let beforeState = annotationStateBeforeDrag {
+                let afterState = annotations
+                onDragCompleted?(beforeState, afterState)
+                annotationStateBeforeDrag = nil
+            }
+
+            isDraggingAnnotation = false
             needsDisplay = true
             return
         }
@@ -1046,6 +1097,102 @@ class AnnotationCanvasView: NSView {
     }
 
     // MARK: - Utility Functions
+
+    private func moveAnnotation(_ annotation: Annotation, by offset: CGPoint) -> Annotation {
+        switch annotation {
+        case let drawing as DrawingAnnotation:
+            let movedPoints = drawing.points.map { point in
+                CGPoint(x: point.x + offset.x, y: point.y + offset.y)
+            }
+            return DrawingAnnotation(
+                points: movedPoints,
+                color: drawing.color,
+                width: drawing.width,
+                isHighlighter: drawing.isHighlighter,
+                anchor: drawing.anchor,
+                paddingContext: drawing.paddingContext
+            )
+
+        case let line as LineAnnotation:
+            return LineAnnotation(
+                startPoint: CGPoint(x: line.startPoint.x + offset.x, y: line.startPoint.y + offset.y),
+                endPoint: CGPoint(x: line.endPoint.x + offset.x, y: line.endPoint.y + offset.y),
+                color: line.color,
+                width: line.width,
+                anchor: line.anchor,
+                paddingContext: line.paddingContext
+            )
+
+        case let rect as RectangleAnnotation:
+            return RectangleAnnotation(
+                startPoint: CGPoint(x: rect.startPoint.x + offset.x, y: rect.startPoint.y + offset.y),
+                endPoint: CGPoint(x: rect.endPoint.x + offset.x, y: rect.endPoint.y + offset.y),
+                color: rect.color,
+                width: rect.width,
+                fillColor: rect.fillColor,
+                anchor: rect.anchor,
+                paddingContext: rect.paddingContext
+            )
+
+        case let circle as CircleAnnotation:
+            return CircleAnnotation(
+                startPoint: CGPoint(x: circle.startPoint.x + offset.x, y: circle.startPoint.y + offset.y),
+                endPoint: CGPoint(x: circle.endPoint.x + offset.x, y: circle.endPoint.y + offset.y),
+                color: circle.color,
+                width: circle.width,
+                fillColor: circle.fillColor,
+                anchor: circle.anchor,
+                paddingContext: circle.paddingContext
+            )
+
+        case let arrow as ArrowAnnotation:
+            let movedControlPoint = arrow.controlPoint.map { controlPoint in
+                CGPoint(x: controlPoint.x + offset.x, y: controlPoint.y + offset.y)
+            }
+            return ArrowAnnotation(
+                startPoint: CGPoint(x: arrow.startPoint.x + offset.x, y: arrow.startPoint.y + offset.y),
+                endPoint: CGPoint(x: arrow.endPoint.x + offset.x, y: arrow.endPoint.y + offset.y),
+                color: arrow.color,
+                width: arrow.width,
+                anchor: arrow.anchor,
+                paddingContext: arrow.paddingContext,
+                controlPoint: movedControlPoint,
+                curveParameter: arrow.curveParameter
+            )
+
+        case let taperedArrow as TaperedArrowAnnotation:
+            return TaperedArrowAnnotation(
+                startPoint: CGPoint(x: taperedArrow.startPoint.x + offset.x, y: taperedArrow.startPoint.y + offset.y),
+                endPoint: CGPoint(x: taperedArrow.endPoint.x + offset.x, y: taperedArrow.endPoint.y + offset.y),
+                color: taperedArrow.color,
+                width: taperedArrow.width,
+                anchor: taperedArrow.anchor,
+                paddingContext: taperedArrow.paddingContext
+            )
+
+        case let text as TextAnnotation:
+            return TextAnnotation(
+                position: CGPoint(x: text.position.x + offset.x, y: text.position.y + offset.y),
+                text: text.text,
+                color: text.color,
+                fontSize: text.fontSize,
+                anchor: text.anchor,
+                paddingContext: text.paddingContext
+            )
+
+        case let blur as BlurAnnotation:
+            return BlurAnnotation(
+                startPoint: CGPoint(x: blur.startPoint.x + offset.x, y: blur.startPoint.y + offset.y),
+                endPoint: CGPoint(x: blur.endPoint.x + offset.x, y: blur.endPoint.y + offset.y),
+                anchor: blur.anchor,
+                paddingContext: blur.paddingContext,
+                blurRadius: blur.blurRadius
+            )
+
+        default:
+            return annotation
+        }
+    }
 
     private func closestPointOnLineSegment(point: CGPoint, lineStart: CGPoint, lineEnd: CGPoint) -> CGPoint {
         let dx = lineEnd.x - lineStart.x

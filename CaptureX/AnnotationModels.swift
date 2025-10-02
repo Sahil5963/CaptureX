@@ -126,13 +126,42 @@ protocol ResizableAnnotation: SelectableAnnotation {
     func resize(startPoint: CGPoint, endPoint: CGPoint) -> Self
 }
 
-struct DrawingAnnotation: Annotation {
+struct DrawingAnnotation: SelectableAnnotation {
     let points: [CGPoint]
     let color: NSColor
     let width: CGFloat
     let isHighlighter: Bool
     let anchor: AnnotationAnchor
     let paddingContext: CGFloat
+
+    var bounds: CGRect {
+        guard !points.isEmpty else { return .zero }
+        let minX = points.map { $0.x }.min() ?? 0
+        let maxX = points.map { $0.x }.max() ?? 0
+        let minY = points.map { $0.y }.min() ?? 0
+        let maxY = points.map { $0.y }.max() ?? 0
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    func contains(point: CGPoint) -> Bool {
+        // Perimeter-based hit detection - check if point is near any path segment
+        let hitTolerance: CGFloat = 12.0
+
+        guard points.count >= 2 else { return false }
+
+        // Check each segment of the drawing path
+        for i in 0..<points.count - 1 {
+            let distance = distanceFromPointToLineSegment(
+                point: point,
+                lineStart: points[i],
+                lineEnd: points[i + 1]
+            )
+            if distance <= hitTolerance {
+                return true
+            }
+        }
+        return false
+    }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
         guard let context = context, points.count >= 2 else { return }
@@ -258,8 +287,17 @@ struct RectangleAnnotation: ResizableAnnotation {
     var strokeWidth: CGFloat { width }
 
     func contains(point: CGPoint) -> Bool {
-        // More generous hit detection for rectangles
-        return rect.insetBy(dx: -8, dy: -8).contains(point)
+        // Perimeter-based hit detection for rectangles
+        let hitTolerance: CGFloat = 12.0
+        let bounds = rect
+
+        // Check if point is near any of the four edges
+        let nearLeftEdge = abs(point.x - bounds.minX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
+        let nearRightEdge = abs(point.x - bounds.maxX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
+        let nearTopEdge = abs(point.y - bounds.minY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
+        let nearBottomEdge = abs(point.y - bounds.maxY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
+
+        return nearLeftEdge || nearRightEdge || nearTopEdge || nearBottomEdge
     }
 
     func resize(startPoint: CGPoint, endPoint: CGPoint) -> RectangleAnnotation {
@@ -320,8 +358,25 @@ struct CircleAnnotation: ResizableAnnotation {
     var strokeWidth: CGFloat { width }
 
     func contains(point: CGPoint) -> Bool {
-        // More generous hit detection for circles
-        return rect.insetBy(dx: -8, dy: -8).contains(point)
+        // Perimeter-based hit detection for circles/ellipses
+        let hitTolerance: CGFloat = 12.0
+        let bounds = rect
+
+        // Calculate center and radii
+        let centerX = bounds.midX
+        let centerY = bounds.midY
+        let radiusX = bounds.width / 2
+        let radiusY = bounds.height / 2
+
+        // Calculate distance from point to ellipse perimeter
+        // Normalize the point to unit circle space
+        let normalizedX = (point.x - centerX) / radiusX
+        let normalizedY = (point.y - centerY) / radiusY
+        let distanceFromCenter = sqrt(normalizedX * normalizedX + normalizedY * normalizedY)
+
+        // Check if point is near the perimeter (distance ≈ 1.0 in normalized space)
+        let distanceFromPerimeter = abs(distanceFromCenter - 1.0) * min(radiusX, radiusY)
+        return distanceFromPerimeter <= hitTolerance
     }
 
     func resize(startPoint: CGPoint, endPoint: CGPoint) -> CircleAnnotation {
@@ -742,7 +797,7 @@ struct TaperedArrowAnnotation: ResizableAnnotation {
     }
 }
 
-struct TextAnnotation: Annotation {
+struct TextAnnotation: SelectableAnnotation {
     var position: CGPoint
     let text: String
     let color: NSColor
@@ -764,6 +819,22 @@ struct TextAnnotation: Annotation {
             width: textSize.width,
             height: textSize.height
         )
+    }
+
+    func contains(point: CGPoint) -> Bool {
+        // Perimeter-based hit detection for text
+        let hitTolerance: CGFloat = 8.0
+        let bounds = self.bounds
+
+        // Check if point is near any of the four edges
+        let nearLeftEdge = abs(point.x - bounds.minX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
+        let nearRightEdge = abs(point.x - bounds.maxX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
+        let nearTopEdge = abs(point.y - bounds.minY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
+        let nearBottomEdge = abs(point.y - bounds.maxY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
+
+        // For text, also allow clicking on the text content itself (not just perimeter)
+        let insideText = bounds.contains(point)
+        return nearLeftEdge || nearRightEdge || nearTopEdge || nearBottomEdge || insideText
     }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
@@ -791,7 +862,7 @@ struct TextAnnotation: Annotation {
     }
 }
 
-struct BlurAnnotation: Annotation {
+struct BlurAnnotation: ResizableAnnotation {
     var startPoint: CGPoint
     var endPoint: CGPoint
     let anchor: AnnotationAnchor
@@ -811,6 +882,33 @@ struct BlurAnnotation: Annotation {
             startPoint = CGPoint(x: newValue.minX, y: newValue.minY)
             endPoint = CGPoint(x: newValue.maxX, y: newValue.maxY)
         }
+    }
+
+    var bounds: CGRect { rect }
+    var strokeWidth: CGFloat { 2.0 }
+
+    func contains(point: CGPoint) -> Bool {
+        // Perimeter-based hit detection for blur rectangles
+        let hitTolerance: CGFloat = 12.0
+        let bounds = rect
+
+        // Check if point is near any of the four edges
+        let nearLeftEdge = abs(point.x - bounds.minX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
+        let nearRightEdge = abs(point.x - bounds.maxX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
+        let nearTopEdge = abs(point.y - bounds.minY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
+        let nearBottomEdge = abs(point.y - bounds.maxY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
+
+        return nearLeftEdge || nearRightEdge || nearTopEdge || nearBottomEdge
+    }
+
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> BlurAnnotation {
+        return BlurAnnotation(
+            startPoint: startPoint,
+            endPoint: endPoint,
+            anchor: anchor,
+            paddingContext: paddingContext,
+            blurRadius: blurRadius
+        )
     }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
