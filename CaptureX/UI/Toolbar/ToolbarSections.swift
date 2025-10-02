@@ -123,11 +123,11 @@ struct StyleControlsSection: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            StrokeWidthMenu(strokeWidth: $appState.strokeWidth)
+
             ColorPicker("", selection: $appState.strokeColor)
                 .frame(width: 32, height: 32)
                 .help("Color")
-
-            StrokeWidthMenu(strokeWidth: $appState.strokeWidth)
 
             BackgroundGradientButton(appState: appState)
         }
@@ -139,7 +139,7 @@ struct StrokeWidthMenu: View {
 
     var body: some View {
         Menu {
-            ForEach([2.0, 4.0, 6.0, 8.0], id: \.self) { width in
+            ForEach([2.0, 4.0, 6.0, 8.0, 10.0], id: \.self) { width in
                 Button(action: { strokeWidth = width }) {
                     HStack {
                         Circle()

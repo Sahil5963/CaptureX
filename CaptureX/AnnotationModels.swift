@@ -699,7 +699,7 @@ struct TaperedArrowAnnotation: ResizableAnnotation {
     func draw(in context: CGContext?, imageSize: CGSize) {
         guard let context = context else { return }
 
-        let arrowheadSize = width * 6.0
+        let arrowheadSize = width * 4.0
         drawStraightTaperedArrow(context: context, start: startPoint, end: endPoint, arrowheadSize: arrowheadSize)
     }
 
@@ -716,7 +716,7 @@ struct TaperedArrowAnnotation: ResizableAnnotation {
         let arrowBase = CGPoint(x: arrowBaseX, y: arrowBaseY)
 
         // Calculate arrowhead wings
-        let arrowheadWidth = arrowheadSize * 0.7
+        let arrowheadWidth = arrowheadSize * 0.85
         let arrowLeft = CGPoint(
             x: arrowBase.x + (arrowheadWidth / 2) * cos(perpAngle),
             y: arrowBase.y + (arrowheadWidth / 2) * sin(perpAngle)
@@ -797,64 +797,92 @@ struct TaperedArrowAnnotation: ResizableAnnotation {
     }
 }
 
-struct TextAnnotation: SelectableAnnotation {
-    var position: CGPoint
+struct TextAnnotation: ResizableAnnotation {
+    var startPoint: CGPoint  // Top-left of text box
+    var endPoint: CGPoint    // Bottom-right of text box (for resizing)
     let text: String
     let color: NSColor
     let fontSize: CGFloat
     let anchor: AnnotationAnchor
     let paddingContext: CGFloat
+    var isEditing: Bool = false
+
+    // Computed position for backward compatibility
+    var position: CGPoint {
+        get { startPoint }
+        set { startPoint = newValue }
+    }
 
     var bounds: CGRect {
+        // Calculate actual text bounds based on current font size
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color
         ]
-        let attributedString = NSAttributedString(string: text, attributes: attributes)
+        let attributedString = NSAttributedString(string: text.isEmpty ? "Text" : text, attributes: attributes)
         let textSize = attributedString.size()
+
+        // Minimal padding to match editing view exactly
+        let padding: CGFloat = 4
         return CGRect(
-            x: position.x,
-            y: position.y - textSize.height,
-            width: textSize.width,
-            height: textSize.height
+            x: startPoint.x - padding,
+            y: startPoint.y - padding,
+            width: textSize.width + padding * 2 + 8,  // Match editing padding
+            height: textSize.height + padding * 2 + 8  // Match editing padding
         )
     }
 
+    var strokeWidth: CGFloat { 2.0 }
+
     func contains(point: CGPoint) -> Bool {
-        // Perimeter-based hit detection for text
-        let hitTolerance: CGFloat = 8.0
-        let bounds = self.bounds
+        // Allow clicking anywhere inside the text box bounds
+        return bounds.contains(point)
+    }
 
-        // Check if point is near any of the four edges
-        let nearLeftEdge = abs(point.x - bounds.minX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
-        let nearRightEdge = abs(point.x - bounds.maxX) <= hitTolerance && point.y >= bounds.minY - hitTolerance && point.y <= bounds.maxY + hitTolerance
-        let nearTopEdge = abs(point.y - bounds.minY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
-        let nearBottomEdge = abs(point.y - bounds.maxY) <= hitTolerance && point.x >= bounds.minX - hitTolerance && point.x <= bounds.maxX + hitTolerance
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> TextAnnotation {
+        // Calculate new font size based on height change
+        let oldHeight = abs(self.endPoint.y - self.startPoint.y)
+        let newHeight = abs(endPoint.y - startPoint.y)
+        let scaleFactor = oldHeight > 0 ? newHeight / oldHeight : 1.0
+        let newFontSize = max(8, min(fontSize * scaleFactor, 200))
 
-        // For text, also allow clicking on the text content itself (not just perimeter)
-        let insideText = bounds.contains(point)
-        return nearLeftEdge || nearRightEdge || nearTopEdge || nearBottomEdge || insideText
+        return TextAnnotation(
+            startPoint: self.startPoint,  // Keep position fixed
+            endPoint: endPoint,
+            text: text,
+            color: color,
+            fontSize: newFontSize,
+            anchor: anchor,
+            paddingContext: paddingContext,
+            isEditing: isEditing
+        )
     }
 
     func draw(in context: CGContext?, imageSize: CGSize) {
-        guard let _ = context, !text.isEmpty else { return }
+        guard let _ = context else { return }
 
+        let displayText = text.isEmpty ? "Text" : text
         let font = NSFont.systemFont(ofSize: fontSize, weight: .medium)
+
+        // Text paragraph style for multiline support
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineBreakMode = .byWordWrapping
+
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: color
+            .foregroundColor: color,
+            .paragraphStyle: paragraphStyle
         ]
 
-        let attributedString = NSAttributedString(string: text, attributes: attributes)
+        let attributedString = NSAttributedString(string: displayText, attributes: attributes)
 
-        // Calculate text size for positioning
-        let textSize = attributedString.size()
+        // Draw text at position - minimal padding to match editing view
         let textRect = CGRect(
-            x: position.x,
-            y: position.y - textSize.height,
-            width: textSize.width,
-            height: textSize.height
+            x: startPoint.x,
+            y: startPoint.y,
+            width: attributedString.size().width + 8,  // Match editing padding
+            height: attributedString.size().height + 8  // Match editing padding
         )
 
         // Draw text

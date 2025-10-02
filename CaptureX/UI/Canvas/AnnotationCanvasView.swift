@@ -26,7 +26,7 @@ enum ResizeHandle {
 
 // MARK: - Main Annotation Canvas View
 
-class AnnotationCanvasView: NSView {
+class AnnotationCanvasView: NSView, NSTextViewDelegate {
     // MARK: - Properties
     var image: NSImage?
     var annotations: [Annotation] = []
@@ -76,6 +76,10 @@ class AnnotationCanvasView: NSView {
     private var isDraggingAnnotation = false
     private var dragStartPoint: CGPoint = .zero
     private var annotationOriginalPosition: CGPoint = .zero
+
+    // Text editing state
+    private var textEditView: NSTextView?
+    private var editingTextIndex: Int?
 
     // Track state before drag/resize for undo batching
     private var annotationStateBeforeDrag: [Annotation]? = nil
@@ -179,6 +183,13 @@ class AnnotationCanvasView: NSView {
         maskPath.addClip()
 
         for (index, annotation) in annotations.enumerated() {
+            // Skip drawing text annotation if it's currently being edited
+            if let textAnnotation = annotation as? TextAnnotation,
+               textAnnotation.isEditing,
+               index == editingTextIndex {
+                continue
+            }
+
             context.saveGState()
 
             // For arrows being actively adjusted, use current mouse position for curve
@@ -356,6 +367,20 @@ class AnnotationCanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
+        // Handle double-click to edit text
+        if event.clickCount == 2 {
+            if let (index, annotation) = findAnnotation(at: point),
+               annotation is TextAnnotation {
+                startEditingText(at: index)
+                return
+            }
+        }
+
+        // End text editing if clicking outside
+        if textEditView != nil {
+            endTextEditing()
+        }
+
         // FIRST: If we're in select mode and have a selected annotation,
         // check for resize handle clicks BEFORE general annotation selection
         if selectedTool == .select,
@@ -516,15 +541,33 @@ class AnnotationCanvasView: NSView {
             currentEndPoint = point
 
         case .text:
+            // Create initial text box - minimal size to avoid layout shift
+            let defaultFontSize: CGFloat = 24
+            let font = NSFont.systemFont(ofSize: defaultFontSize, weight: .medium)
+            let attributes: [NSAttributedString.Key: Any] = [.font: font]
+            let placeholderSize = NSAttributedString(string: "Text", attributes: attributes).size()
+
             let textAnnotation = TextAnnotation(
-                position: point,
-                text: "Text",
+                startPoint: point,
+                endPoint: CGPoint(x: point.x + placeholderSize.width + 16, y: point.y + placeholderSize.height + 16),
+                text: "",  // Start empty for immediate editing
                 color: strokeColor,
-                fontSize: 16,
+                fontSize: defaultFontSize,
                 anchor: .box,
-                paddingContext: backgroundGradient == .none ? 0 : padding
+                paddingContext: backgroundGradient == .none ? 0 : padding,
+                isEditing: true
             )
             onAnnotationAdded?(textAnnotation)
+
+            // Auto-switch to select tool to avoid adding more text on next click
+            onToolChanged?(.select)
+            selectedTool = .select
+
+            // Start editing immediately on next run loop
+            DispatchQueue.main.async {
+                let newIndex = self.annotations.count - 1
+                self.startEditingText(at: newIndex)
+            }
 
         default:
             break
@@ -718,8 +761,11 @@ class AnnotationCanvasView: NSView {
     override func mouseMoved(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
-        // Find annotation under mouse for hover effect
-        if let (index, _) = findAnnotation(at: point) {
+        // Set cursor based on tool
+        if selectedTool == .text {
+            // Text cursor when text tool is selected
+            NSCursor.iBeam.set()
+        } else if let (index, _) = findAnnotation(at: point) {
             // Change cursor to hand when over a shape
             NSCursor.pointingHand.set()
 
@@ -738,6 +784,21 @@ class AnnotationCanvasView: NSView {
         }
     }
 
+    override func cursorUpdate(with event: NSEvent) {
+        if selectedTool == .text {
+            NSCursor.iBeam.set()
+        } else {
+            super.cursorUpdate(with: event)
+        }
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        if selectedTool == .text {
+            addCursorRect(bounds, cursor: .iBeam)
+        }
+    }
+
     override func mouseExited(with event: NSEvent) {
         // Reset cursor when mouse leaves the view
         NSCursor.arrow.set()
@@ -745,6 +806,199 @@ class AnnotationCanvasView: NSView {
             hoveredAnnotationIndex = nil
             needsDisplay = true
         }
+    }
+
+    // MARK: - Text Editing
+
+    private func startEditingText(at index: Int) {
+        guard index < annotations.count,
+              let textAnnotation = annotations[index] as? TextAnnotation else { return }
+
+        // End any existing text editing
+        endTextEditing()
+
+        editingTextIndex = index
+
+        // Calculate initial frame based on text content
+        let font = NSFont.systemFont(ofSize: textAnnotation.fontSize, weight: .medium)
+        let attributes: [NSAttributedString.Key: Any] = [.font: font]
+
+        // Use actual text or minimal size if empty - no placeholder "Text"
+        let initialText = textAnnotation.text.isEmpty ? "A" : textAnnotation.text
+        let textSize = NSAttributedString(string: initialText, attributes: attributes).size()
+
+        // Start with minimal height to avoid layout shift
+        let initialFrame = CGRect(
+            x: textAnnotation.startPoint.x,
+            y: textAnnotation.startPoint.y,
+            width: max(textSize.width + 4, 50), // Minimal padding
+            height: textSize.height + 4  // Minimal padding
+        )
+
+        // Create text view for editing
+        let textView = NSTextView(frame: initialFrame)
+        textView.backgroundColor = NSColor.clear  // Transparent background
+        textView.textColor = textAnnotation.color
+        textView.font = font
+        textView.alignment = .left
+        textView.isRichText = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.drawsBackground = false  // No background
+        textView.string = textAnnotation.text
+        textView.delegate = self
+
+        // Remove internal padding to avoid layout-driven vertical shifts
+        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainer?.lineFragmentPadding = 0
+
+        // Configure text container for dynamic sizing - allow horizontal expansion
+        textView.isHorizontallyResizable = true  // Allow horizontal growth
+        textView.isVerticallyResizable = false
+        textView.autoresizingMask = []  // Disable autoresizing to prevent frame changes
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)  // Infinite width
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.minSize = NSSize(width: 0, height: 0)  // No minimum size constraints
+
+        // Add subtle border for visibility during editing
+        textView.wantsLayer = true
+        textView.layer?.borderColor = NSColor.systemBlue.withAlphaComponent(0.5).cgColor
+        textView.layer?.borderWidth = 1
+        textView.layer?.cornerRadius = 2
+
+        addSubview(textView)
+        textEditView = textView
+
+        // Select all text and make first responder
+        window?.makeFirstResponder(textView)
+        if textAnnotation.text.isEmpty {
+            // If empty, just position cursor at start
+            textView.setSelectedRange(NSRange(location: 0, length: 0))
+        } else {
+            // Select all existing text
+            textView.selectAll(nil)
+        }
+
+        // Mark annotation as editing
+        let updatedAnnotation = TextAnnotation(
+            startPoint: textAnnotation.startPoint,
+            endPoint: textAnnotation.endPoint,
+            text: textAnnotation.text,
+            color: textAnnotation.color,
+            fontSize: textAnnotation.fontSize,
+            anchor: textAnnotation.anchor,
+            paddingContext: textAnnotation.paddingContext,
+            isEditing: true
+        )
+        annotations[index] = updatedAnnotation
+
+        needsDisplay = true
+    }
+
+    private func endTextEditing() {
+        guard let textView = textEditView,
+              let index = editingTextIndex,
+              index < annotations.count,
+              let textAnnotation = annotations[index] as? TextAnnotation else {
+            textEditView?.removeFromSuperview()
+            textEditView = nil
+            editingTextIndex = nil
+            return
+        }
+
+        // Get the edited text
+        let newText = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        textView.removeFromSuperview()
+        textEditView = nil
+        editingTextIndex = nil
+
+        // If text is empty, remove the annotation entirely
+        if newText.isEmpty {
+            annotations.remove(at: index)
+            selectedAnnotationIndex = nil
+            onAnnotationSelected?(nil)
+            needsDisplay = true
+            return
+        }
+
+        // Calculate new bounds based on actual text size
+        let font = NSFont.systemFont(ofSize: textAnnotation.fontSize, weight: .medium)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: textAnnotation.color
+        ]
+        let attributedString = NSAttributedString(string: newText, attributes: attributes)
+        let textSize = attributedString.size()
+
+        // Update endPoint to match actual text size
+        let newEndPoint = CGPoint(
+            x: textAnnotation.startPoint.x + textSize.width + 16,
+            y: textAnnotation.startPoint.y + textSize.height + 16
+        )
+
+        let updatedAnnotation = TextAnnotation(
+            startPoint: textAnnotation.startPoint,
+            endPoint: newEndPoint,
+            text: newText,
+            color: textAnnotation.color,
+            fontSize: textAnnotation.fontSize,
+            anchor: textAnnotation.anchor,
+            paddingContext: textAnnotation.paddingContext,
+            isEditing: false
+        )
+
+        annotations[index] = updatedAnnotation
+        onAnnotationUpdated?(index, updatedAnnotation)
+
+        needsDisplay = true
+    }
+
+    // NSTextViewDelegate methods
+    func textDidChange(_ notification: Notification) {
+        guard let textView = textEditView,
+              let index = editingTextIndex,
+              index < annotations.count,
+              let textAnnotation = annotations[index] as? TextAnnotation else { return }
+
+        // Store original origin to prevent movement
+        let originalOrigin = textView.frame.origin
+
+        // Let NSTextView handle its own layout - just ensure we have the right layout
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+
+        // Force layout update
+        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+
+        // Get the actual used rect for the text
+        if let layoutManager = textView.layoutManager,
+           let textContainer = textView.textContainer {
+            let usedRect = layoutManager.usedRect(for: textContainer)
+
+            // Stable height: derive only from explicit newlines, not glyph bounding
+            let font = textView.font ?? NSFont.systemFont(ofSize: 24, weight: .medium)
+            let lineHeight = layoutManager.defaultLineHeight(for: font)
+            let explicitLines = max(1, textView.string.components(separatedBy: CharacterSet.newlines).count)
+
+            // Use minimal external padding and keep origin constant to avoid jumping
+            let textOrigin = textView.textContainerOrigin
+            let newWidth = max(usedRect.width + 8 + textOrigin.x, 50)
+            let newHeight = CGFloat(explicitLines) * lineHeight + 8
+
+            let newFrame = CGRect(
+                x: originalOrigin.x,  // Keep X position
+                y: originalOrigin.y,  // Keep Y position (bottom anchored)
+                width: newWidth,
+                height: newHeight
+            )
+            textView.frame = newFrame
+        }
+    }
+
+    func textDidEndEditing(_ notification: Notification) {
+        endTextEditing()
     }
 
     // MARK: - Helper Functions
@@ -1001,6 +1255,18 @@ class AnnotationCanvasView: NSView {
             if endHandle.contains(point) {
                 return .bottomRight  // Reuse existing handle type for end point
             }
+        } else if let text = annotation as? TextAnnotation {
+            // For text: only bottom-right handle for font scaling
+            let bounds = text.bounds
+            let bottomRightHandle = CGRect(
+                x: bounds.maxX - handleSize/2,
+                y: bounds.maxY - handleSize/2,
+                width: handleSize,
+                height: handleSize
+            )
+            if bottomRightHandle.contains(point) {
+                return .bottomRight
+            }
         } else {
             // Handle other shapes with corner boxes (fallback)
             let bounds = selectableAnnotation.bounds
@@ -1172,12 +1438,14 @@ class AnnotationCanvasView: NSView {
 
         case let text as TextAnnotation:
             return TextAnnotation(
-                position: CGPoint(x: text.position.x + offset.x, y: text.position.y + offset.y),
+                startPoint: CGPoint(x: text.startPoint.x + offset.x, y: text.startPoint.y + offset.y),
+                endPoint: CGPoint(x: text.endPoint.x + offset.x, y: text.endPoint.y + offset.y),
                 text: text.text,
                 color: text.color,
                 fontSize: text.fontSize,
                 anchor: text.anchor,
-                paddingContext: text.paddingContext
+                paddingContext: text.paddingContext,
+                isEditing: text.isEditing
             )
 
         case let blur as BlurAnnotation:
@@ -1537,6 +1805,11 @@ class AnnotationCanvasView: NSView {
     }
 
     private func drawTextControls(text: TextAnnotation, in context: CGContext, isSelected: Bool) {
+        // Don't draw controls if currently editing
+        if text.isEditing {
+            return
+        }
+
         let bounds = text.bounds
 
         // Draw selection border
@@ -1552,27 +1825,18 @@ class AnnotationCanvasView: NSView {
         context.stroke(bounds)
         context.setLineDash(phase: 0, lengths: [])
 
-        // For text: single move handle at center + small resize handles at corners
-        let moveHandleSize: CGFloat = isSelected ? 20 : 16  // Large central move handle
-        let resizeHandleSize: CGFloat = isSelected ? 12 : 8  // Small corner resize handles
+        // For text: only show bottom-right resize handle for font scaling
+        let resizeHandleSize: CGFloat = isSelected ? 18 : 14
 
-        // Central move handle
-        let moveHandle = CGRect(
-            x: bounds.midX - moveHandleSize/2,
-            y: bounds.midY - moveHandleSize/2,
-            width: moveHandleSize,
-            height: moveHandleSize
+        // Bottom-right resize handle (for scaling font size)
+        let resizeHandle = CGRect(
+            x: bounds.maxX - resizeHandleSize/2,
+            y: bounds.maxY - resizeHandleSize/2,
+            width: resizeHandleSize,
+            height: resizeHandleSize
         )
 
-        // Corner resize handles
-        let resizeHandles = [
-            CGRect(x: bounds.minX - resizeHandleSize/2, y: bounds.minY - resizeHandleSize/2, width: resizeHandleSize, height: resizeHandleSize),
-            CGRect(x: bounds.maxX - resizeHandleSize/2, y: bounds.minY - resizeHandleSize/2, width: resizeHandleSize, height: resizeHandleSize),
-            CGRect(x: bounds.minX - resizeHandleSize/2, y: bounds.maxY - resizeHandleSize/2, width: resizeHandleSize, height: resizeHandleSize),
-            CGRect(x: bounds.maxX - resizeHandleSize/2, y: bounds.maxY - resizeHandleSize/2, width: resizeHandleSize, height: resizeHandleSize)
-        ]
-
-        // Draw move handle (prominent)
+        // Draw resize handle
         if isSelected {
             context.setFillColor(NSColor.systemBlue.cgColor)
         } else {
@@ -1580,16 +1844,8 @@ class AnnotationCanvasView: NSView {
         }
         context.setStrokeColor(NSColor.white.cgColor)
         context.setLineWidth(2.5)
-        context.fillEllipse(in: moveHandle)
-        context.strokeEllipse(in: moveHandle)
-
-        // Draw resize handles (subtle)
-        context.setFillColor(NSColor.systemGray.withAlphaComponent(0.6).cgColor)
-        context.setLineWidth(1.5)
-        for handle in resizeHandles {
-            context.fillEllipse(in: handle)
-            context.strokeEllipse(in: handle)
-        }
+        context.fillEllipse(in: resizeHandle)
+        context.strokeEllipse(in: resizeHandle)
     }
 
     private func drawBlurControls(blur: BlurAnnotation, in context: CGContext, isSelected: Bool) {

@@ -22,6 +22,22 @@ struct LeftSidebarView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     SectionHeader(title: "Tools")
                     ToolSelectorGrid(appState: appState)
+
+                    // Stroke Width (moved under tools)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Stroke Width")
+                            .font(.subheadline.bold())
+                        HStack(spacing: 8) {
+                            ForEach([2.0, 4.0, 6.0, 8.0, 10.0], id: \.self) { width in
+                                Button(action: { appState.strokeWidth = width }) {
+                                    Circle()
+                                        .fill(appState.strokeWidth == width ? Color.accentColor : Color.primary)
+                                        .frame(width: CGFloat(width + 8), height: CGFloat(width + 8))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
                 }
 
                 Divider()
@@ -49,10 +65,10 @@ struct LeftSidebarView: View {
 
                 Divider()
 
-                // Color & Stroke Section
+                // Color Section
                 VStack(alignment: .leading, spacing: 12) {
-                    SectionHeader(title: "Color & Stroke")
-                    ColorStrokeSection(appState: appState)
+                    SectionHeader(title: "Color")
+                    ColorSection(appState: appState)
                 }
 
                 Divider()
@@ -261,35 +277,14 @@ struct GradientGrid: View {
     }
 }
 
-struct ColorStrokeSection: View {
+struct ColorSection: View {
     @Bindable var appState: AnnotationAppState
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Color Picker
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Color")
-                    .font(.subheadline.bold())
-                ColorPicker("", selection: $appState.strokeColor)
-                    .frame(height: 40)
-                    .labelsHidden()
-            }
-
-            // Stroke Width
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Stroke Width")
-                    .font(.subheadline.bold())
-                HStack(spacing: 8) {
-                    ForEach([2.0, 4.0, 6.0, 8.0], id: \.self) { width in
-                        Button(action: { appState.strokeWidth = width }) {
-                            Circle()
-                                .fill(appState.strokeWidth == width ? Color.accentColor : Color.primary)
-                                .frame(width: CGFloat(width + 8), height: CGFloat(width + 8))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
+        VStack(alignment: .leading, spacing: 6) {
+            ColorPicker("", selection: $appState.strokeColor)
+                .frame(height: 40)
+                .labelsHidden()
         }
     }
 }

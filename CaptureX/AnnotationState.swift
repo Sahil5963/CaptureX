@@ -17,7 +17,11 @@ class AnnotationAppState {
     var annotations: [Annotation] = []
     var selectedAnnotationIndex: Int? = nil
     var strokeColor: Color = .red
-    var strokeWidth: Double = 3.0
+    var strokeWidth: Double = UserDefaults.standard.double(forKey: "lastStrokeWidth") != 0 ? UserDefaults.standard.double(forKey: "lastStrokeWidth") : 4.0 {
+        didSet {
+            UserDefaults.standard.set(strokeWidth, forKey: "lastStrokeWidth")
+        }
+    }
     var selectedGradient: BackgroundGradient = .none
     var padding: CGFloat = 32.0 {
         didSet {
@@ -382,12 +386,14 @@ class AnnotationAppState {
 
         case let text as TextAnnotation:
             return TextAnnotation(
-                position: CGPoint(x: text.position.x + offset.x, y: text.position.y + offset.y),
+                startPoint: CGPoint(x: text.startPoint.x + offset.x, y: text.startPoint.y + offset.y),
+                endPoint: CGPoint(x: text.endPoint.x + offset.x, y: text.endPoint.y + offset.y),
                 text: text.text,
                 color: text.color,
                 fontSize: text.fontSize,
                 anchor: text.anchor,
-                paddingContext: text.paddingContext
+                paddingContext: text.paddingContext,
+                isEditing: text.isEditing
             )
 
         case let blur as BlurAnnotation:
