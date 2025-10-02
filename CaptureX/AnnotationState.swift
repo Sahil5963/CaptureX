@@ -45,8 +45,48 @@ class AnnotationAppState {
     }
     var scrollView: NSScrollView?
 
+    // Flag to prevent recording undo/redo actions
+    var isPerformingUndoRedo: Bool = false
+
+    // Flag to prevent recording during active drag/resize operations
+    var isDraggingOrResizing: Bool = false
+
+    // Undo/Redo callback - now sends full state snapshots
+    var onStateChanged: ((AppStateSnapshot, AppStateSnapshot) -> Void)?
+
+    // Helper to create a snapshot of current state
+    func createSnapshot() -> AppStateSnapshot {
+        return AppStateSnapshot(
+            annotations: annotations,
+            selectedGradient: selectedGradient,
+            padding: padding,
+            cornerRadius: cornerRadius,
+            showShadow: showShadow,
+            shadowOffset: shadowOffset,
+            shadowBlur: shadowBlur,
+            shadowOpacity: shadowOpacity
+        )
+    }
+
+    // Helper to restore from snapshot
+    func restoreFromSnapshot(_ snapshot: AppStateSnapshot) {
+        isPerformingUndoRedo = true
+        annotations = snapshot.annotations
+        selectedGradient = snapshot.selectedGradient
+        padding = snapshot.padding
+        cornerRadius = snapshot.cornerRadius
+        showShadow = snapshot.showShadow
+        shadowOffset = snapshot.shadowOffset
+        shadowBlur = snapshot.shadowBlur
+        shadowOpacity = snapshot.shadowOpacity
+        selectedAnnotationIndex = nil
+        isPerformingUndoRedo = false
+    }
+
     // Actions
     func addAnnotation(_ annotation: Annotation) {
+        // NOTE: Tracking is done in CanvasScrollView.onAnnotationAdded
+        // to capture state BEFORE annotation is added
         annotations.append(annotation)
     }
 
@@ -57,13 +97,34 @@ class AnnotationAppState {
     func deleteSelectedAnnotation() {
         guard let index = selectedAnnotationIndex,
               index < annotations.count else { return }
+        let oldSnapshot = createSnapshot()
         annotations.remove(at: index)
         selectedAnnotationIndex = nil
+        if !isPerformingUndoRedo {
+            let newSnapshot = createSnapshot()
+            onStateChanged?(oldSnapshot, newSnapshot)
+        }
     }
 
     func updateAnnotation(at index: Int, with annotation: Annotation) {
         guard index < annotations.count else { return }
+        let oldSnapshot = createSnapshot()
         annotations[index] = annotation
+        // Don't record undo during active dragging/resizing
+        if !isPerformingUndoRedo && !isDraggingOrResizing {
+            let newSnapshot = createSnapshot()
+            onStateChanged?(oldSnapshot, newSnapshot)
+        }
+    }
+
+    // Method to record state changes for gradient, padding, etc.
+    func recordStateChange() {
+        if !isPerformingUndoRedo && !isDraggingOrResizing {
+            // This will be called AFTER a change, so we need to pass the current state twice
+            // The actual old state should be tracked before the change
+            let snapshot = createSnapshot()
+            onStateChanged?(snapshot, snapshot)
+        }
     }
 
     func toggleGradientPicker() {

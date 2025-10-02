@@ -74,6 +74,15 @@ class AnnotationCanvasView: NSView {
     private var currentMousePosition: CGPoint = .zero
     private var hoveredAnnotationIndex: Int? = nil
 
+    // Track state before drag/resize for undo batching
+    private var annotationStateBeforeDrag: [Annotation]? = nil
+
+    // Callback to notify state when drag starts/ends
+    var onDragStateChanged: ((Bool) -> Void)?
+
+    // Callback to record full state snapshot before and after drag
+    var onDragCompleted: (([Annotation], [Annotation]) -> Void)?
+
     // MARK: - Initialization
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -288,7 +297,21 @@ class AnnotationCanvasView: NSView {
     }
 
     private func drawSelectionBox(for annotation: Annotation, at index: Int, in context: CGContext, isSelected: Bool = true) {
-        guard annotation is SelectableAnnotation else { return }
+        guard let selectableAnnotation = annotation as? SelectableAnnotation else { return }
+
+        // Draw selection border around the shape for better visual feedback
+        if isSelected {
+            context.saveGState()
+            let bounds = selectableAnnotation.bounds
+            let expandedBounds = bounds.insetBy(dx: -4, dy: -4) // Slightly larger than the shape
+
+            context.setStrokeColor(NSColor.systemBlue.withAlphaComponent(0.4).cgColor)
+            context.setLineWidth(2.0)
+            context.setLineDash(phase: 0, lengths: [4, 4])
+            context.stroke(expandedBounds)
+            context.setLineDash(phase: 0, lengths: []) // Reset dash
+            context.restoreGState()
+        }
 
         // Shape-specific transformation controls
         if let arrow = annotation as? ArrowAnnotation {
@@ -320,6 +343,10 @@ class AnnotationCanvasView: NSView {
             let annotation = annotations[selectedIndex]
             let handle = getResizeHandle(at: point, for: annotation)
             if handle != .none {
+                // Save state before drag for undo batching
+                annotationStateBeforeDrag = annotations
+                onDragStateChanged?(true) // Notify that drag started
+
                 // Start transformation immediately
                 isResizing = true
                 resizeHandle = handle
@@ -505,6 +532,17 @@ class AnnotationCanvasView: NSView {
 
     override func mouseUp(with event: NSEvent) {
         if isResizing {
+            // Notify that drag ended
+            onDragStateChanged?(false)
+
+            // If we have state before drag, trigger a single undo entry with snapshots
+            if let beforeState = annotationStateBeforeDrag {
+                let afterState = annotations
+                // Use the special drag completed callback that will create proper snapshots
+                onDragCompleted?(beforeState, afterState)
+                annotationStateBeforeDrag = nil
+            }
+
             isResizing = false
             resizeHandle = .none
             isAdjustingCurve = false
@@ -603,15 +641,30 @@ class AnnotationCanvasView: NSView {
 
         // Find annotation under mouse for hover effect
         if let (index, _) = findAnnotation(at: point) {
+            // Change cursor to hand when over a shape
+            NSCursor.pointingHand.set()
+
             if hoveredAnnotationIndex != index {
                 hoveredAnnotationIndex = index
                 needsDisplay = true
             }
         } else {
+            // Reset cursor to arrow when not over a shape
+            NSCursor.arrow.set()
+
             if hoveredAnnotationIndex != nil {
                 hoveredAnnotationIndex = nil
                 needsDisplay = true
             }
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        // Reset cursor when mouse leaves the view
+        NSCursor.arrow.set()
+        if hoveredAnnotationIndex != nil {
+            hoveredAnnotationIndex = nil
+            needsDisplay = true
         }
     }
 

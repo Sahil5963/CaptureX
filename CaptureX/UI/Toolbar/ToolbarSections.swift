@@ -87,14 +87,14 @@ struct UndoRedoSection: View {
     }
 
     private func performUndo() {
-        if let previousState = undoRedoManager.undo() {
-            appState.annotations = previousState
+        if let snapshot = undoRedoManager.undo() {
+            appState.restoreFromSnapshot(snapshot)
         }
     }
 
     private func performRedo() {
-        if let nextState = undoRedoManager.redo() {
-            appState.annotations = nextState
+        if let snapshot = undoRedoManager.redo() {
+            appState.restoreFromSnapshot(snapshot)
         }
     }
 }

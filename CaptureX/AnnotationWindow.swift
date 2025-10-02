@@ -18,6 +18,8 @@ class AnnotationWindow: NSWindow {
     private var isPinned = false
     private var hasUnsavedChanges = false
     var onWindowClosed: ((AnnotationWindow) -> Void)?
+    private var undoRedoManager: UndoRedoManager?
+    private var appState: AnnotationAppState?
 
     init(image: NSImage, floating: Bool = false) {
         self.screenshotImage = image
@@ -50,6 +52,51 @@ class AnnotationWindow: NSWindow {
         self.delegate = self
     }
 
+    // Handle keyboard shortcuts
+    override func keyDown(with event: NSEvent) {
+        // Cmd+Z for undo
+        if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "z" {
+            if event.modifierFlags.contains(.shift) {
+                // Cmd+Shift+Z for redo
+                performRedo()
+            } else {
+                // Cmd+Z for undo
+                performUndo()
+            }
+            return
+        }
+
+        // Delete or Backspace key for deleting selected annotation
+        if event.keyCode == 51 || event.keyCode == 117 { // Delete (51) or Backspace (117)
+            if let state = appState {
+                state.deleteSelectedAnnotation()
+            }
+            return
+        }
+
+        super.keyDown(with: event)
+    }
+
+    private func performUndo() {
+        guard let manager = undoRedoManager, let state = appState else { return }
+
+        if manager.canUndo {
+            if let snapshot = manager.undo() {
+                state.restoreFromSnapshot(snapshot)
+            }
+        }
+    }
+
+    private func performRedo() {
+        guard let manager = undoRedoManager, let state = appState else { return }
+
+        if manager.canRedo {
+            if let snapshot = manager.redo() {
+                state.restoreFromSnapshot(snapshot)
+            }
+        }
+    }
+
     private func setupContentView() {
         let annotationView = AnnotationView(
             image: screenshotImage,
@@ -59,6 +106,10 @@ class AnnotationWindow: NSWindow {
             },
             onAnnotationChanged: { [weak self] in
                 self?.markAsChanged()
+            },
+            onStateManagerReady: { [weak self] state, manager in
+                self?.appState = state
+                self?.undoRedoManager = manager
             }
         )
         self.contentView = NSHostingView(rootView: annotationView)
@@ -84,6 +135,10 @@ class AnnotationWindow: NSWindow {
                 },
                 onAnnotationChanged: { [weak self] in
                     self?.markAsChanged()
+                },
+                onStateManagerReady: { [weak self] state, manager in
+                    self?.appState = state
+                    self?.undoRedoManager = manager
                 }
             )
         }
@@ -108,10 +163,12 @@ class AnnotationWindow: NSWindow {
         // Clean up any resources
         if let hostingView = self.contentView as? NSHostingView<AnnotationView> {
             // Clear the root view to help with cleanup
-            hostingView.rootView = AnnotationView(image: NSImage(), isPinned: false, onTogglePin: nil)
+            hostingView.rootView = AnnotationView(image: NSImage(), isPinned: false, onTogglePin: nil, onAnnotationChanged: nil, onStateManagerReady: nil)
         }
         self.contentView = nil
         self.delegate = nil
+        self.appState = nil
+        self.undoRedoManager = nil
     }
 
     deinit {
@@ -174,6 +231,7 @@ struct AnnotationView: View {
     var isPinned: Bool = false
     var onTogglePin: (() -> Void)?
     var onAnnotationChanged: (() -> Void)?
+    var onStateManagerReady: ((AnnotationAppState, UndoRedoManager) -> Void)?
 
     @State private var appState = AnnotationAppState()
     @StateObject private var undoRedoManager = UndoRedoManager()
@@ -189,6 +247,20 @@ struct AnnotationView: View {
         )
         .sheet(isPresented: $appState.showOCRResult) {
             OCRResultView(text: appState.extractedText)
+        }
+        .onAppear {
+            // Set up undo/redo tracking for ALL state changes (annotations, gradient, padding, etc.)
+            appState.onStateChanged = { oldSnapshot, newSnapshot in
+                let command = StateCommand(previousState: oldSnapshot, newState: newSnapshot)
+                _ = undoRedoManager.execute(command: command)
+            }
+
+            // Save initial state so first undo works properly
+            let initialSnapshot = appState.createSnapshot()
+            undoRedoManager.setInitialState(initialSnapshot)
+
+            // Pass state and manager to window
+            onStateManagerReady?(appState, undoRedoManager)
         }
         .onChange(of: appState.annotations.count) { _, _ in
             // Trigger callback when annotations change
@@ -207,10 +279,31 @@ struct AppLayoutView: View {
     var onTogglePin: (() -> Void)?
     var onAnnotationChanged: (() -> Void)?
 
+    @State private var snapshotBeforeSliderDrag: AppStateSnapshot? = nil
+    @State private var isSliderDragging = false
+
     var body: some View {
         HStack(spacing: 0) {
             // Left Sidebar with all tools and settings
-            LeftSidebarView(appState: appState)
+            LeftSidebarView(
+                appState: appState,
+                onSliderDragStarted: {
+                    // Save snapshot when slider drag starts
+                    if !isSliderDragging {
+                        snapshotBeforeSliderDrag = appState.createSnapshot()
+                        isSliderDragging = true
+                    }
+                },
+                onSliderDragEnded: {
+                    // Save undo entry when slider drag ends
+                    if isSliderDragging, let beforeSnapshot = snapshotBeforeSliderDrag {
+                        let afterSnapshot = appState.createSnapshot()
+                        appState.onStateChanged?(beforeSnapshot, afterSnapshot)
+                        snapshotBeforeSliderDrag = nil
+                        isSliderDragging = false
+                    }
+                }
+            )
 
             // Main Canvas Area
             VStack(spacing: 0) {
@@ -228,6 +321,25 @@ struct AppLayoutView: View {
                     image: image,
                     appState: appState
                 )
+            }
+        }
+        .onChange(of: appState.selectedGradient) { oldValue, newValue in
+            // Gradient is a button, not a slider - track immediately
+            if !appState.isPerformingUndoRedo && !isSliderDragging {
+                // Create snapshot with old gradient
+                var beforeSnapshot = appState.createSnapshot()
+                beforeSnapshot = AppStateSnapshot(
+                    annotations: beforeSnapshot.annotations,
+                    selectedGradient: oldValue,
+                    padding: beforeSnapshot.padding,
+                    cornerRadius: beforeSnapshot.cornerRadius,
+                    showShadow: beforeSnapshot.showShadow,
+                    shadowOffset: beforeSnapshot.shadowOffset,
+                    shadowBlur: beforeSnapshot.shadowBlur,
+                    shadowOpacity: beforeSnapshot.shadowOpacity
+                )
+                let afterSnapshot = appState.createSnapshot()
+                appState.onStateChanged?(beforeSnapshot, afterSnapshot)
             }
         }
     }
@@ -289,14 +401,18 @@ struct MinimalTopBar: View {
 
     // MARK: - Action Methods
     private func performUndo() {
-        if let previousState = undoRedoManager.undo() {
-            appState.annotations = previousState
+        if undoRedoManager.canUndo {
+            if let snapshot = undoRedoManager.undo() {
+                appState.restoreFromSnapshot(snapshot)
+            }
         }
     }
 
     private func performRedo() {
-        if let nextState = undoRedoManager.redo() {
-            appState.annotations = nextState
+        if undoRedoManager.canRedo {
+            if let snapshot = undoRedoManager.redo() {
+                appState.restoreFromSnapshot(snapshot)
+            }
         }
     }
 

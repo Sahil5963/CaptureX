@@ -89,8 +89,20 @@ struct CanvasScrollView: NSViewRepresentable {
         canvasView.shadowOffset = appState.shadowOffset
         canvasView.shadowBlur = appState.shadowBlur
         canvasView.shadowOpacity = appState.shadowOpacity
-        canvasView.onAnnotationAdded = { annotation in
+        canvasView.onAnnotationAdded = { [weak appState] annotation in
+            guard let appState = appState else { return }
+
+            // Capture state BEFORE adding annotation
+            let oldSnapshot = appState.createSnapshot()
+
+            // Add annotation
             annotations.append(annotation)
+
+            // Record undo entry with before/after states
+            if !appState.isPerformingUndoRedo {
+                let newSnapshot = appState.createSnapshot()
+                appState.onStateChanged?(oldSnapshot, newSnapshot)
+            }
         }
         canvasView.onAnnotationSelected = { index in
             appState.selectAnnotation(at: index)
@@ -104,6 +116,33 @@ struct CanvasScrollView: NSViewRepresentable {
                 annotations[index] = annotation
             }
             appState.updateAnnotation(at: index, with: annotation)
+        }
+        canvasView.onDragStateChanged = { isDragging in
+            appState.isDraggingOrResizing = isDragging
+        }
+        canvasView.onDragCompleted = { beforeState, afterState in
+            // Create snapshots with the before and after annotation states
+            let beforeSnapshot = AppStateSnapshot(
+                annotations: beforeState,
+                selectedGradient: appState.selectedGradient,
+                padding: appState.padding,
+                cornerRadius: appState.cornerRadius,
+                showShadow: appState.showShadow,
+                shadowOffset: appState.shadowOffset,
+                shadowBlur: appState.shadowBlur,
+                shadowOpacity: appState.shadowOpacity
+            )
+            let afterSnapshot = AppStateSnapshot(
+                annotations: afterState,
+                selectedGradient: appState.selectedGradient,
+                padding: appState.padding,
+                cornerRadius: appState.cornerRadius,
+                showShadow: appState.showShadow,
+                shadowOffset: appState.shadowOffset,
+                shadowBlur: appState.shadowBlur,
+                shadowOpacity: appState.shadowOpacity
+            )
+            appState.onStateChanged?(beforeSnapshot, afterSnapshot)
         }
 
         let canvasSize = calculateCanvasSize(for: image, with: padding, gradient: backgroundGradient)

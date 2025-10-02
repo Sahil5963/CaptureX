@@ -12,6 +12,8 @@ import SwiftUI
 
 struct LeftSidebarView: View {
     @Bindable var appState: AnnotationAppState
+    var onSliderDragStarted: (() -> Void)? = nil
+    var onSliderDragEnded: (() -> Void)? = nil
 
     var body: some View {
         ScrollView {
@@ -27,7 +29,11 @@ struct LeftSidebarView: View {
                 // Canvas Section
                 VStack(alignment: .leading, spacing: 12) {
                     SectionHeader(title: "Canvas")
-                    CanvasSettingsSection(appState: appState)
+                    CanvasSettingsSection(
+                        appState: appState,
+                        onSliderDragStarted: onSliderDragStarted,
+                        onSliderDragEnded: onSliderDragEnded
+                    )
                 }
 
                 Divider()
@@ -83,6 +89,8 @@ struct SectionHeader: View {
 
 struct CanvasSettingsSection: View {
     @Bindable var appState: AnnotationAppState
+    var onSliderDragStarted: (() -> Void)? = nil
+    var onSliderDragEnded: (() -> Void)? = nil
 
     private var paddingBinding: Binding<Double> {
         Binding<Double>(
@@ -108,7 +116,13 @@ struct CanvasSettingsSection: View {
                     Text("0")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Slider(value: paddingBinding, in: 0...300)
+                    Slider(value: paddingBinding, in: 0...300, onEditingChanged: { editing in
+                        if editing {
+                            onSliderDragStarted?()
+                        } else {
+                            onSliderDragEnded?()
+                        }
+                    })
                     Text("300")
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -151,7 +165,13 @@ struct CanvasSettingsSection: View {
                     Text("0")
                         .font(.caption2)
                         .foregroundColor(.secondary)
-                    Slider(value: cornerBinding, in: 0...48)
+                    Slider(value: cornerBinding, in: 0...48, onEditingChanged: { editing in
+                        if editing {
+                            onSliderDragStarted?()
+                        } else {
+                            onSliderDragEnded?()
+                        }
+                    })
                     Text("48")
                         .font(.caption2)
                         .foregroundColor(.secondary)
@@ -183,7 +203,13 @@ struct CanvasSettingsSection: View {
                                 appState.showShadow = false
                             }
                         }
-                    ), in: 0...1)
+                    ), in: 0...1, onEditingChanged: { editing in
+                        if editing {
+                            onSliderDragStarted?()
+                        } else {
+                            onSliderDragEnded?()
+                        }
+                    })
                     Text("100")
                         .font(.caption2)
                         .foregroundColor(.secondary)

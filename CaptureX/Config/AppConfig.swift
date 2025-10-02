@@ -22,7 +22,7 @@ struct AppConfig {
     // .development = Use sample images, skip permissions, show dev indicators
     // .production  = Real screen capture, full permissions, production behavior
     //
-    static let environment: AppEnvironment = .production
+    static let environment: AppEnvironment = .development
 
     // MARK: - Computed Properties
     static var isDevelopmentMode: Bool {
