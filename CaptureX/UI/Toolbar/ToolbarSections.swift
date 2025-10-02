@@ -109,6 +109,7 @@ struct DrawingToolsSection: View {
             ToolbarButton(icon: "highlighter", isSelected: appState.selectedTool == .highlight, action: { appState.selectedTool = .highlight }, help: "Highlight")
             ToolbarButton(icon: "line.diagonal", isSelected: appState.selectedTool == .line, action: { appState.selectedTool = .line }, help: "Line")
             ToolbarButton(icon: "arrow.up.right", isSelected: appState.selectedTool == .arrow, action: { appState.selectedTool = .arrow }, help: "Arrow")
+            ToolbarButton(icon: "arrowtriangle.right.fill", isSelected: appState.selectedTool == .taperedArrow, action: { appState.selectedTool = .taperedArrow }, help: "Tapered Arrow")
             ToolbarButton(icon: "rectangle", isSelected: appState.selectedTool == .rectangle, action: { appState.selectedTool = .rectangle }, help: "Rectangle")
             ToolbarButton(icon: "circle", isSelected: appState.selectedTool == .circle, action: { appState.selectedTool = .circle }, help: "Circle")
             ToolbarButton(icon: "textformat", isSelected: appState.selectedTool == .text, action: { appState.selectedTool = .text }, help: "Text")

@@ -36,7 +36,7 @@ fileprivate func distanceFromPointToLineSegment(point: CGPoint, lineStart: CGPoi
 // MARK: - Supporting Enums and Types
 
 enum AnnotationTool: CaseIterable {
-    case select, draw, highlight, arrow, line, rectangle, circle, text, blur
+    case select, draw, highlight, arrow, taperedArrow, line, rectangle, circle, text, blur
 }
 
 enum AnnotationAnchor {
@@ -586,6 +586,159 @@ struct ArrowAnnotation: ResizableAnnotation {
         }
 
         context.strokePath()
+    }
+}
+
+// MARK: - Tapered Arrow (Custom SVG Style)
+
+struct TaperedArrowAnnotation: ResizableAnnotation {
+    var startPoint: CGPoint
+    var endPoint: CGPoint
+    let color: NSColor
+    let width: CGFloat
+    let anchor: AnnotationAnchor
+    let paddingContext: CGFloat
+
+    var strokeWidth: CGFloat { width }
+
+    var midPoint: CGPoint {
+        CGPoint(
+            x: (startPoint.x + endPoint.x) / 2,
+            y: (startPoint.y + endPoint.y) / 2
+        )
+    }
+
+    var bounds: CGRect {
+        let minX = min(startPoint.x, endPoint.x) - 20
+        let maxX = max(startPoint.x, endPoint.x) + 20
+        let minY = min(startPoint.y, endPoint.y) - 20
+        let maxY = max(startPoint.y, endPoint.y) + 20
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    func contains(point: CGPoint) -> Bool {
+        let lineDistance = distanceFromPointToLineSegment(point: point, lineStart: startPoint, lineEnd: endPoint)
+        return lineDistance <= max(12.0, width * 3)
+    }
+
+    func resize(startPoint: CGPoint, endPoint: CGPoint) -> TaperedArrowAnnotation {
+        return TaperedArrowAnnotation(
+            startPoint: startPoint,
+            endPoint: endPoint,
+            color: color,
+            width: width,
+            anchor: anchor,
+            paddingContext: paddingContext
+        )
+    }
+
+    init(startPoint: CGPoint, endPoint: CGPoint, color: NSColor, width: CGFloat, anchor: AnnotationAnchor, paddingContext: CGFloat) {
+        self.startPoint = startPoint
+        self.endPoint = endPoint
+        self.color = color
+        self.width = width
+        self.anchor = anchor
+        self.paddingContext = paddingContext
+    }
+
+    func draw(in context: CGContext?, imageSize: CGSize) {
+        guard let context = context else { return }
+
+        let arrowheadSize = width * 6.0
+        drawStraightTaperedArrow(context: context, start: startPoint, end: endPoint, arrowheadSize: arrowheadSize)
+    }
+
+    private func drawStraightTaperedArrow(context: CGContext, start: CGPoint, end: CGPoint, arrowheadSize: CGFloat) {
+        let angle = atan2(end.y - start.y, end.x - start.x)
+        let perpAngle = angle + .pi / 2
+
+        let tailWidth = width * 0.3
+        let headWidth = width * 1.0
+        let cornerRadius = width * 0.4  // Roundness for corners
+
+        let arrowBaseX = end.x - arrowheadSize * cos(angle)
+        let arrowBaseY = end.y - arrowheadSize * sin(angle)
+        let arrowBase = CGPoint(x: arrowBaseX, y: arrowBaseY)
+
+        // Calculate arrowhead wings
+        let arrowheadWidth = arrowheadSize * 0.7
+        let arrowLeft = CGPoint(
+            x: arrowBase.x + (arrowheadWidth / 2) * cos(perpAngle),
+            y: arrowBase.y + (arrowheadWidth / 2) * sin(perpAngle)
+        )
+        let arrowRight = CGPoint(
+            x: arrowBase.x - (arrowheadWidth / 2) * cos(perpAngle),
+            y: arrowBase.y - (arrowheadWidth / 2) * sin(perpAngle)
+        )
+
+        // Calculate shaft edge points
+        let shaftTopEnd = CGPoint(
+            x: arrowBase.x + (headWidth / 2) * cos(perpAngle),
+            y: arrowBase.y + (headWidth / 2) * sin(perpAngle)
+        )
+        let shaftBottomEnd = CGPoint(
+            x: arrowBase.x - (headWidth / 2) * cos(perpAngle),
+            y: arrowBase.y - (headWidth / 2) * sin(perpAngle)
+        )
+
+        let shaftTopStart = CGPoint(
+            x: start.x + (tailWidth / 2) * cos(perpAngle),
+            y: start.y + (tailWidth / 2) * sin(perpAngle)
+        )
+        let shaftBottomStart = CGPoint(
+            x: start.x - (tailWidth / 2) * cos(perpAngle),
+            y: start.y - (tailWidth / 2) * sin(perpAngle)
+        )
+
+        // Create unified path with rounded corners
+        let path = CGMutablePath()
+
+        // Start from top of tail
+        path.move(to: shaftTopStart)
+
+        // Top edge to arrowhead base (with rounded corner at junction)
+        path.addLine(to: shaftTopEnd)
+
+        // Rounded corner from shaft to arrowhead wing
+        path.addArc(
+            tangent1End: arrowLeft,
+            tangent2End: end,
+            radius: cornerRadius
+        )
+
+        // Arrowhead tip (smooth curve)
+        path.addArc(
+            tangent1End: end,
+            tangent2End: arrowRight,
+            radius: cornerRadius * 0.6
+        )
+
+        // Rounded corner from arrowhead wing back to shaft
+        path.addArc(
+            tangent1End: arrowRight,
+            tangent2End: shaftBottomEnd,
+            radius: cornerRadius
+        )
+
+        // Bottom edge back to tail
+        path.addLine(to: shaftBottomEnd)
+        path.addLine(to: shaftBottomStart)
+
+        // Rounded tail cap
+        path.addArc(
+            center: start,
+            radius: tailWidth / 2,
+            startAngle: angle - .pi / 2,
+            endAngle: angle + .pi / 2,
+            clockwise: false
+        )
+
+        path.closeSubpath()
+
+        // Render with smooth edges
+        context.setFillColor(color.cgColor)
+        context.addPath(path)
+        context.fillPath()
     }
 }
 

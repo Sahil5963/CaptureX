@@ -17,6 +17,7 @@ struct ToolSelectorGrid: View {
         (.highlight, "highlighter"),
         (.line, "line.diagonal"),
         (.arrow, "arrow.up.right"),
+        (.taperedArrow, "arrowtriangle.right.fill"),
         (.rectangle, "rectangle"),
         (.circle, "circle"),
         (.text, "textformat"),

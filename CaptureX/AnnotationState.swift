@@ -370,6 +370,16 @@ class AnnotationAppState {
                 curveParameter: arrow.curveParameter
             )
 
+        case let taperedArrow as TaperedArrowAnnotation:
+            return TaperedArrowAnnotation(
+                startPoint: CGPoint(x: taperedArrow.startPoint.x + offset.x, y: taperedArrow.startPoint.y + offset.y),
+                endPoint: CGPoint(x: taperedArrow.endPoint.x + offset.x, y: taperedArrow.endPoint.y + offset.y),
+                color: taperedArrow.color,
+                width: taperedArrow.width,
+                anchor: taperedArrow.anchor,
+                paddingContext: taperedArrow.paddingContext
+            )
+
         case let text as TextAnnotation:
             return TextAnnotation(
                 position: CGPoint(x: text.position.x + offset.x, y: text.position.y + offset.y),

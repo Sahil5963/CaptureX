@@ -194,6 +194,9 @@ class AnnotationCanvasView: NSView {
                     curveParameter: arrow.curveParameter
                 )
                 tempArrow.draw(in: context, imageSize: image.size)
+            } else if let taperedArrow = annotation as? TaperedArrowAnnotation {
+                // Just draw the tapered arrow normally (no curve support)
+                taperedArrow.draw(in: context, imageSize: image.size)
             } else {
                 annotation.draw(in: context, imageSize: image.size)
             }
@@ -289,7 +292,19 @@ class AnnotationCanvasView: NSView {
             context.addLine(to: arrowPoint1)
             context.move(to: currentEndPoint)
             context.addLine(to: arrowPoint2)
-            context.strokePath()
+
+        case .taperedArrow:
+            // Preview tapered arrow while drawing
+            let tempArrow = TaperedArrowAnnotation(
+                startPoint: startPoint,
+                endPoint: currentEndPoint,
+                color: strokeColor,
+                width: strokeWidth,
+                anchor: currentAnchor,
+                paddingContext: backgroundGradient == .none ? 0 : padding
+            )
+            tempArrow.draw(in: context, imageSize: image?.size ?? .zero)
+            // Don't call strokePath - tapered arrow uses fillPath internally
 
         default:
             break
@@ -316,6 +331,8 @@ class AnnotationCanvasView: NSView {
         // Shape-specific transformation controls
         if let arrow = annotation as? ArrowAnnotation {
             drawArrowControls(arrow: arrow, at: index, in: context, isSelected: isSelected)
+        } else if let taperedArrow = annotation as? TaperedArrowAnnotation {
+            drawTaperedArrowControls(arrow: taperedArrow, at: index, in: context, isSelected: isSelected)
         } else if let rectangle = annotation as? RectangleAnnotation {
             drawRectangleControls(rectangle: rectangle, in: context, isSelected: isSelected)
         } else if let circle = annotation as? CircleAnnotation {
@@ -475,7 +492,7 @@ class AnnotationCanvasView: NSView {
             isDrawing = true
             currentPath = [point]
 
-        case .line, .arrow, .rectangle, .circle, .blur:
+        case .line, .arrow, .taperedArrow, .rectangle, .circle, .blur:
             isDrawing = true
             startPoint = point
             currentEndPoint = point
@@ -520,7 +537,7 @@ class AnnotationCanvasView: NSView {
         case .draw, .highlight:
             currentPath.append(point)
 
-        case .line, .arrow, .rectangle, .circle, .blur:
+        case .line, .arrow, .taperedArrow, .rectangle, .circle, .blur:
             currentEndPoint = point
 
         default:
@@ -618,6 +635,17 @@ class AnnotationCanvasView: NSView {
             )
             onAnnotationAdded?(annotation)
 
+        case .taperedArrow:
+            let annotation = TaperedArrowAnnotation(
+                startPoint: startPoint,
+                endPoint: currentEndPoint,
+                color: strokeColor,
+                width: strokeWidth,
+                anchor: currentAnchor,
+                paddingContext: backgroundGradient == .none ? 0 : padding
+            )
+            onAnnotationAdded?(annotation)
+
         case .blur:
             let annotation = BlurAnnotation(
                 startPoint: startPoint,
@@ -702,7 +730,7 @@ class AnnotationCanvasView: NSView {
             var newEndPoint = resizableAnnotation.endPoint
 
             // Handle arrows differently - direct endpoint movement
-            if annotation is ArrowAnnotation {
+            if annotation is ArrowAnnotation || annotation is TaperedArrowAnnotation {
                 switch resizeHandle {
                 case .topLeft:
                     // Moving start point
@@ -832,6 +860,27 @@ class AnnotationCanvasView: NSView {
             }
             if endHandle.contains(point) {
                 return .bottomRight  // Reuse existing handle type for end point
+            }
+        } else if let taperedArrow = annotation as? TaperedArrowAnnotation {
+            // Handle tapered arrows with endpoint dots
+            let startHandle = CGRect(
+                x: taperedArrow.startPoint.x - handleSize/2,
+                y: taperedArrow.startPoint.y - handleSize/2,
+                width: handleSize,
+                height: handleSize
+            )
+            let endHandle = CGRect(
+                x: taperedArrow.endPoint.x - handleSize/2,
+                y: taperedArrow.endPoint.y - handleSize/2,
+                width: handleSize,
+                height: handleSize
+            )
+
+            if startHandle.contains(point) {
+                return .topLeft
+            }
+            if endHandle.contains(point) {
+                return .bottomRight
             }
         } else if let rectangle = annotation as? RectangleAnnotation {
             // Handle rectangles with corner + side handles
@@ -1177,6 +1226,36 @@ class AnnotationCanvasView: NSView {
                 context.strokeEllipse(in: subtleHandle)
             }
         }
+    }
+
+    private func drawTaperedArrowControls(arrow: TaperedArrowAnnotation, at index: Int, in context: CGContext, isSelected: Bool) {
+        // Simple endpoint handles only (no curve support)
+        let handleSize: CGFloat = isSelected ? 18 : 14
+        let startHandle = CGRect(
+            x: arrow.startPoint.x - handleSize/2,
+            y: arrow.startPoint.y - handleSize/2,
+            width: handleSize,
+            height: handleSize
+        )
+        let endHandle = CGRect(
+            x: arrow.endPoint.x - handleSize/2,
+            y: arrow.endPoint.y - handleSize/2,
+            width: handleSize,
+            height: handleSize
+        )
+
+        // Draw endpoint handles
+        if isSelected {
+            context.setFillColor(NSColor.systemBlue.cgColor)
+        } else {
+            context.setFillColor(NSColor.systemOrange.withAlphaComponent(0.8).cgColor)
+        }
+        context.setStrokeColor(NSColor.white.cgColor)
+        context.setLineWidth(2.5)
+        context.fillEllipse(in: startHandle)
+        context.strokeEllipse(in: startHandle)
+        context.fillEllipse(in: endHandle)
+        context.strokeEllipse(in: endHandle)
     }
 
     private func drawRectangleControls(rectangle: RectangleAnnotation, in context: CGContext, isSelected: Bool) {
