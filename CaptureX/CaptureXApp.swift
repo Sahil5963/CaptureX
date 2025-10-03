@@ -44,7 +44,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let statusButton = statusItem?.button {
             // Show different icon for development mode
             let iconName = AppConfig.showDevelopmentIndicator ? "camera.viewfinder.fill" : "camera.viewfinder"
-            statusButton.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "CaptureX")
+            let image = NSImage(systemSymbolName: iconName, accessibilityDescription: "CaptureX")
+
+            // Configure image for menu bar display
+            image?.isTemplate = true  // This makes it render properly in menu bar
+
+            // Set proper size for menu bar (16-18pt is standard)
+            let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+            statusButton.image = image?.withSymbolConfiguration(config)
 
             // Add development indicator to title/tooltip
             if AppConfig.showDevelopmentIndicator {
